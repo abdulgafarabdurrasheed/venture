@@ -1,0 +1,116 @@
+.project-card {
+  --brown: #3d2914;
+  --cream: #f5e6c8;
+  --stripe-blue: #8daab8;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+  border: 3px solid var(--brown);
+  border-radius: 14px;
+  background: var(--cream);
+  overflow: hidden;
+  min-height: 8.5rem;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.project-card:hover {
+  transform: translateY(-2px);
+}
+
+.project-card__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 12px minmax(0, 0.42fr);
+}
+
+.project-card__row--stripe {
+  background: var(--stripe-blue);
+  border-bottom: 2px solid var(--brown);
+  min-height: 2.1rem;
+}
+
+.project-card__row--stripe:last-child {
+  border-bottom: none;
+  border-top: 2px solid var(--brown);
+}
+
+.project-card__row--body {
+  flex: 1;
+}
+
+.project-card__main {
+  padding: 0.45rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.project-card__row--body .project-card__main {
+  padding-top: 0.65rem;
+  padding-bottom: 0.75rem;
+}
+
+.project-card__name {
+  display: block;
+  font-size: clamp(0.85rem, 1.8vw, 1rem);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--brown);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-card__stub {
+  border-left: 2px dashed var(--brown);
+  border-right: 2px dashed var(--brown);
+}
+
+.project-card__row--stripe .project-card__stub {
+  border-color: var(--brown);
+}
+
+.project-card__main p,
+.project-card__side p {
+  margin: 0;
+  font-size: clamp(0.72rem, 1.5vw, 0.88rem);
+  line-height: 1.35;
+  color: var(--brown);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.project-card__label {
+  font-weight: 700;
+}
+
+.project-card__side {
+  padding: 0.45rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  text-align: center;
+}
+
+.project-card__row--body .project-card__side {
+  padding-top: 0.65rem;
+  padding-bottom: 0.75rem;
+}
+
+.project-card__status,
+.project-card__hours {
+  font-weight: 700;
+}
+
+@media (max-width: 480px) {
+  .project-card__row {
+    grid-template-columns: minmax(0, 1fr) 8px minmax(0, 0.48fr);
+  }
+}

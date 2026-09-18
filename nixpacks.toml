@@ -1,0 +1,15 @@
+# Coolify uses Nixpacks by default when no Dockerfile build pack is selected.
+# Prefer the Dockerfile build pack in Coolify if possible.
+
+[variables]
+NODE_ENV = "production"
+NIXPACKS_NODE_VERSION = "20"
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"

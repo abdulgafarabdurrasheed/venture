@@ -1,0 +1,225 @@
+.shop-modal__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgba(61, 41, 20, 0.45);
+}
+
+.shop-modal {
+  position: relative;
+  width: min(30rem, 100%);
+  max-height: min(88vh, 44rem);
+  overflow-y: auto;
+  padding: 1.35rem 1.5rem 1.5rem;
+  border: 3px solid #3d2914;
+  border-radius: 16px;
+  background: #f5e6c8;
+  color: #3d2914;
+}
+
+.shop-modal__close {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.75rem;
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #3d2914;
+  cursor: pointer;
+}
+
+.shop-modal__image {
+  display: block;
+  width: min(12rem, 70%);
+  max-height: 10rem;
+  margin: 0 auto 1rem;
+  object-fit: contain;
+}
+
+.shop-modal__title {
+  margin: 0 0 0.65rem;
+  font-size: 1.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.shop-modal__description {
+  margin: 0 0 1rem;
+  line-height: 1.45;
+}
+
+.shop-modal__rates {
+  margin: 0 0 1rem;
+  padding: 0.55rem 0.7rem;
+  border: 2px solid #3d2914;
+  border-radius: 8px;
+  background: #fff8e8;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.shop-modal__row,
+.shop-modal__total {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.92rem;
+}
+
+.shop-modal__total {
+  margin-top: 0.65rem;
+  margin-bottom: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.shop-modal__link {
+  display: inline-block;
+  margin: 0 0 0.85rem;
+  color: #3d2914;
+  font-weight: 700;
+}
+
+.shop-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.shop-modal__field input,
+.shop-modal__field textarea {
+  padding: 0.55rem 0.65rem;
+  border: 2px solid #3d2914;
+  border-radius: 8px;
+  background: #fff8e8;
+  color: #3d2914;
+  font: inherit;
+}
+
+.shop-modal__field textarea {
+  resize: vertical;
+  min-height: 5.5rem;
+  line-height: 1.45;
+  text-transform: none;
+  font-weight: 400;
+}
+
+.shop-modal__warning {
+  margin: 0 0 0.75rem;
+  color: #8b2e2e;
+  line-height: 1.4;
+}
+
+.shop-modal__buy {
+  width: 100%;
+  padding: 0.65rem 0.9rem;
+  border: 2px solid #3d2914;
+  border-radius: 10px;
+  background: #edd9b8;
+  color: #3d2914;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.shop-modal__buy:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.shop-modal__confirm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  border-radius: 13px;
+  background: rgba(61, 41, 20, 0.72);
+}
+
+.shop-modal__confirm {
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 1rem 1.1rem 1.15rem;
+  border: 2px solid #3d2914;
+  border-radius: 12px;
+  background: #fff8e8;
+}
+
+.shop-modal__confirm-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.shop-modal__confirm-intro {
+  margin: 0 0 0.85rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.shop-modal__confirm-list {
+  margin: 0 0 0.85rem;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.shop-modal__confirm-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.65rem;
+  align-items: start;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  font-weight: 400;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.shop-modal__confirm-item input {
+  margin-top: 0.2rem;
+  width: 1rem;
+  height: 1rem;
+  accent-color: #3d2914;
+}
+
+.shop-modal__confirm-hint {
+  margin: 0 0 0.75rem;
+  color: #8b2e2e;
+  font-size: 0.82rem;
+}
+
+.shop-modal__confirm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 0.65rem;
+}
+
+.shop-modal__confirm-back {
+  padding: 0.65rem 0.9rem;
+  border: 2px solid #3d2914;
+  border-radius: 10px;
+  background: transparent;
+  color: #3d2914;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.shop-modal__confirm-actions .shop-modal__buy {
+  margin: 0;
+}

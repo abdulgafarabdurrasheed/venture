@@ -1,0 +1,67 @@
+.shop-order-row {
+  --brown: #3d2914;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  border: 2px solid var(--brown);
+  border-radius: 999px;
+  overflow: hidden;
+  min-height: 2.4rem;
+}
+
+.shop-order-row__details {
+  padding: 0.35rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.05rem;
+}
+
+.shop-order-row__name,
+.shop-order-row__qty {
+  margin: 0;
+  font-size: clamp(0.62rem, 1.2vw, 0.75rem);
+  font-weight: 700;
+  color: var(--brown);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+.shop-order-row__status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.85rem;
+  min-width: 5.5rem;
+  font-size: clamp(0.62rem, 1.2vw, 0.75rem);
+  font-weight: 700;
+  color: var(--brown);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border-left: 2px solid var(--brown);
+}
+
+.shop-order-row--pending .shop-order-row__details {
+  background: #b1cacd;
+}
+
+.shop-order-row--pending .shop-order-row__status {
+  background: #b1cacd;
+}
+
+.shop-order-row--fulfilled .shop-order-row__details {
+  background: #a0af70;
+}
+
+.shop-order-row--fulfilled .shop-order-row__status {
+  background: #a0af70;
+}
+
+.shop-order-row--rejected .shop-order-row__details {
+  background: #e0c5c5;
+}
+
+.shop-order-row--rejected .shop-order-row__status {
+  background: #d19a9a;
+}

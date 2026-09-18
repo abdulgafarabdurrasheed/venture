@@ -1,0 +1,90 @@
+.signup-welcome {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(env(safe-area-inset-top, 0px), 1rem) 1rem max(env(safe-area-inset-bottom, 0px), 1rem);
+  background: rgba(61, 41, 20, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.signup-welcome__dialog {
+  position: relative;
+  width: min(92vw, 520px);
+  padding: clamp(1.35rem, 4vw, 2rem) clamp(1.25rem, 4vw, 2rem) clamp(1.5rem, 4vw, 2.1rem);
+  background: #f5e6c8;
+  border: 3px solid #3d2914;
+  border-radius: 14px;
+  box-shadow: 0 14px 36px rgba(61, 41, 20, 0.35);
+  color: #3d2914;
+  font-family: "Iosevka Charon", ui-monospace, monospace;
+  text-align: center;
+}
+
+.signup-welcome__close {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.55rem;
+  border: none;
+  background: transparent;
+  color: #3d2914;
+  font-size: 1.75rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.15rem 0.35rem;
+}
+
+.signup-welcome__close:hover {
+  color: #1a5a9e;
+}
+
+.signup-welcome__title {
+  margin: 0 0 0.85rem;
+  font-size: clamp(1.35rem, 4.5vw, 1.75rem);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.signup-welcome__text {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1rem, 3.2vw, 1.2rem);
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.signup-welcome__link-line {
+  margin: 0.35rem 0 1.25rem;
+  font-size: clamp(0.95rem, 3vw, 1.1rem);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.signup-welcome__link-line a {
+  color: #1a5a9e;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.signup-welcome__link-line a:hover {
+  color: #3d2914;
+}
+
+.signup-welcome__ok {
+  border: 2px solid #3d2914;
+  border-radius: 999px;
+  background: #e8d4b0;
+  color: #3d2914;
+  font-family: inherit;
+  font-size: clamp(1rem, 3vw, 1.1rem);
+  font-weight: 700;
+  padding: 0.55rem 1.75rem;
+  cursor: pointer;
+  transition: transform 150ms ease, background 150ms ease;
+}
+
+.signup-welcome__ok:hover {
+  background: #f5e6c8;
+  transform: translateY(-2px);
+}

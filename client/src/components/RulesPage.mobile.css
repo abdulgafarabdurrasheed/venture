@@ -1,0 +1,98 @@
+@media (max-width: 1023px) {
+  .rules-page__top {
+    flex-direction: column;
+    align-items: stretch;
+    padding-bottom: 0.5rem;
+  }
+
+  .rules-page__logo {
+    width: clamp(96px, 32vw, 128px);
+    align-self: flex-start;
+    transform: none;
+    margin: 0;
+  }
+
+  .rules-page__top-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-items: center;
+    gap: 0.4rem 0.6rem;
+    width: 100%;
+  }
+
+  .rules-page__top-nav a {
+    font-size: clamp(0.95rem, 3.6vw, 1.15rem);
+  }
+
+  .rules-page__content {
+    width: min(100%, 40rem);
+    padding-left: max(env(safe-area-inset-left, 0px), 1rem);
+    padding-right: max(env(safe-area-inset-right, 0px), 1rem);
+    padding-top: clamp(5.5rem, 14vh, 6.5rem);
+    margin-bottom: max(env(safe-area-inset-bottom, 0px), 6rem);
+  }
+
+  .rules-page__header h1 {
+    font-size: clamp(1.75rem, 9vw, 2.5rem);
+  }
+
+  .rules-page__header > p {
+    font-size: clamp(0.95rem, 4vw, 1.15rem);
+  }
+
+  .rules-page__index {
+    gap: 0.45rem;
+  }
+
+  .rules-page__index a {
+    font-size: clamp(0.82rem, 3.2vw, 0.95rem);
+    padding: 0.4rem 0.65rem;
+  }
+
+  .rules-page__card h2 {
+    font-size: clamp(1.35rem, 6vw, 1.85rem);
+  }
+
+  .rules-page__card h3 {
+    font-size: clamp(1.15rem, 5vw, 1.45rem);
+  }
+
+  .rules-page__card p,
+  .rules-page__card li {
+    font-size: clamp(0.95rem, 4vw, 1.1rem);
+  }
+
+  .rules-page__table-wrap {
+    margin-left: -0.25rem;
+    margin-right: -0.25rem;
+  }
+
+  .rules-page__table {
+    font-size: clamp(0.82rem, 3.2vw, 0.95rem);
+  }
+
+  .rules-page__table th,
+  .rules-page__table td {
+    padding: 0.45rem 0.5rem;
+  }
+
+  .rules-page__brand {
+    right: max(env(safe-area-inset-right, 0px), 0.75rem);
+    bottom: max(env(safe-area-inset-bottom, 0px), 0.75rem);
+  }
+
+  .rules-page__brand img {
+    width: min(9rem, 38vw);
+  }
+
+  .rules-page__back {
+    font-size: clamp(1rem, 4vw, 1.2rem);
+    padding: 0.5rem 0.85rem;
+  }
+}
+
+@media (max-width: 390px) {
+  .rules-page__top-nav {
+    grid-template-columns: 1fr 1fr;
+  }
+}

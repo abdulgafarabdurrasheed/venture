@@ -1,0 +1,40 @@
+.offtrack-slack-channels {
+  margin: 1.25rem 0 0;
+  border: 3px solid var(--brown, #3d2914);
+  border-radius: 14px;
+  padding: clamp(1rem, 2vw, 1.25rem);
+  background: rgba(245, 230, 200, 0.92);
+  box-shadow: 5px 5px 0 rgba(61, 41, 20, 0.18);
+  text-align: center;
+}
+
+.offtrack-slack-channels h2 {
+  margin: 0 0 0.75rem;
+  font-family: var(--font, "Iosevka Charon", ui-monospace, monospace);
+  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+  color: var(--brown, #3d2914);
+}
+
+.offtrack-slack-channels__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.offtrack-slack-channels__links a {
+  border: 2px solid var(--brown, #3d2914);
+  border-radius: 999px;
+  padding: 0.4rem 0.85rem;
+  background: #9bc1c9;
+  color: var(--brown, #3d2914);
+  font-family: var(--font, "Iosevka Charon", ui-monospace, monospace);
+  font-size: clamp(0.9rem, 1.2vw, 1rem);
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 3px 3px 0 rgba(61, 41, 20, 0.15);
+}
+
+.offtrack-slack-channels__links a:hover {
+  transform: translateY(-2px);
+}

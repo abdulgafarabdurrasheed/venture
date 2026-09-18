@@ -1,0 +1,15 @@
+node_modules
+client/node_modules
+client/dist
+.git
+.gitignore
+.env
+.env.*
+*.log
+.cache
+.vite
+coverage
+.DS_Store
+server/uploads
+README.md
+docker-compose.yml

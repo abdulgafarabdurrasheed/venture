@@ -1,0 +1,116 @@
+.journaling-review-page {
+  display: block;
+}
+
+.journaling-project-card {
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.journaling-project-card:focus-visible {
+  outline: 3px solid #f7cf57;
+  outline-offset: 3px;
+}
+
+.journaling-review-back {
+  cursor: pointer;
+  font: inherit;
+}
+
+.journaling-gate {
+  width: min(28rem, calc(100% - 2rem));
+  margin: 12vh auto 0;
+  padding: 1.5rem;
+  border: 3px solid #8b6239;
+  border-radius: 16px;
+  background: rgba(61, 41, 20, 0.82);
+  box-shadow: 0 12px 32px rgba(45, 30, 16, 0.28);
+}
+
+.journaling-gate h1 {
+  margin: 0 0 0.6rem;
+  color: #fff8e8;
+  text-shadow: 0 3px 0 #3d2914;
+}
+
+.journaling-gate p {
+  color: rgba(245, 230, 200, 0.82);
+  line-height: 1.5;
+}
+
+.journaling-gate form {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1.2rem;
+}
+
+.journaling-gate label {
+  font-weight: 800;
+}
+
+.journaling-gate input {
+  border: 2px solid #8b6239;
+  border-radius: 12px;
+  padding: 0.8rem;
+  background: rgba(20, 12, 6, 0.55);
+  color: #f5e6c8;
+  font: inherit;
+}
+
+.journaling-gate button,
+.journaling-review-links a {
+  border: 2px solid #8b6239;
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  background: rgba(61, 41, 20, 0.85);
+  color: #f7cf57;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.journaling-gate button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.journaling-gate-error {
+  color: #ffccd4 !important;
+}
+
+.journaling-review-entry > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.65rem;
+}
+
+.journaling-review-entry > header span {
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  background: #f7cf57;
+  color: #3d2914;
+  font-weight: 800;
+}
+
+.journaling-review-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.8rem;
+}
+
+.journaling-review-links a {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.journaling-review-links a:hover {
+  border-color: #f7cf57;
+  background: rgba(61, 41, 20, 1);
+}

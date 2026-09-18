@@ -1,0 +1,111 @@
+/* ── Admin stats page – extends .admin-page / .admin-content from AdminPage.css ── */
+
+.astat-content {
+  max-width: 1100px;
+}
+
+.astat-loading {
+  color: rgba(245, 230, 200, 0.75);
+  text-align: center;
+  margin: 2rem 0;
+}
+
+.astat-error {
+  color: #ff8fab;
+  text-align: center;
+  margin: 1rem 0;
+  padding: 0.8rem 1rem;
+  border: 2px solid rgba(255, 143, 171, 0.45);
+  border-radius: 10px;
+  background: rgba(255, 100, 100, 0.08);
+}
+
+/* Sections */
+.astat-section {
+  margin: 2.4rem 0;
+}
+
+.astat-section-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #f7cf57;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin: 0 0 1rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid rgba(247, 207, 87, 0.3);
+}
+
+/* Stat cards */
+.astat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.astat-card {
+  padding: 1.2rem 1rem;
+  border: 3px solid rgba(139, 98, 57, 0.5);
+  border-radius: 14px;
+  background: rgba(61, 41, 20, 0.72);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.astat-card:hover {
+  border-color: #f7cf57;
+  transform: translateY(-2px);
+}
+
+.astat-card-value {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: #f7cf57;
+  text-shadow: 0 2px 0 #50483f;
+  line-height: 1;
+}
+
+.astat-card-label {
+  font-size: 0.82rem;
+  color: #f5e6c8;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.astat-card-sub {
+  font-size: 0.75rem;
+  color: rgba(245, 230, 200, 0.55);
+}
+
+/* Sankey */
+.astat-sankey-wrap {
+  margin-top: 1.6rem;
+  padding: 1.4rem;
+  border: 3px solid #8b6239;
+  border-radius: 16px;
+  background: rgba(61, 41, 20, 0.72);
+}
+
+.astat-sankey-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: rgba(245, 230, 200, 0.75);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin: 0 0 1rem;
+}
+
+.astat-sankey {
+  display: block;
+  width: 100%;
+  max-width: 660px;
+  margin: 0 auto;
+}
+
+@media (max-width: 600px) {
+  .astat-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

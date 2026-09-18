@@ -1,0 +1,183 @@
+.platform-frame__content--user {
+  display: flex;
+  align-items: stretch;
+  padding: 6% 4.5% 12%;
+  overflow: hidden;
+}
+
+.user-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.user-page__board {
+  --brown: #3d2914;
+  --panel-profile: #d6a47a;
+  --panel-stats: #c58b59;
+  --panel-orders: #e4a46d;
+  flex: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 0;
+  min-height: 0;
+}
+
+.user-page__profile-group {
+  display: contents;
+}
+
+.user-page__profile,
+.user-page__stats,
+.user-page__orders {
+  border: 3px solid var(--brown);
+  min-width: 0;
+}
+
+.user-page__profile {
+  width: clamp(11.25rem, 22vw, 14.75rem);
+  height: auto;
+  align-self: center;
+  background: var(--panel-profile);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(0.65rem, 1.5vw, 1rem);
+  padding: clamp(1rem, 2.2vw, 1.45rem) clamp(0.85rem, 1.8vw, 1.2rem);
+  border-radius: 14px 0 0 14px;
+}
+
+.user-page__avatar {
+  display: block;
+  width: clamp(5.5rem, 13.5vw, 8.75rem);
+  height: auto;
+  flex-shrink: 0;
+}
+
+.user-page__name {
+  margin: 0;
+  width: 100%;
+  font-size: clamp(1.15rem, 2.55vw, 1.8rem);
+  font-weight: 700;
+  color: var(--brown);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: center;
+  line-height: 1.15;
+  word-break: break-word;
+}
+
+.user-page__stats {
+  height: 100%;
+  align-self: stretch;
+  background: var(--panel-stats);
+  padding: clamp(1.1rem, 2.4vw, 1.75rem) clamp(1rem, 2.2vw, 1.5rem);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: clamp(0.45rem, 1.05vw, 0.7rem);
+  border-radius: 14px;
+}
+
+.user-page__stats p {
+  margin: 0;
+  font-size: clamp(1.42rem, 2.95vw, 2.05rem);
+  font-weight: 700;
+  color: var(--brown);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1.25;
+}
+
+.user-page__stats-gap {
+  min-height: clamp(0.75rem, 1.8vw, 1.25rem);
+}
+
+.user-page__orders {
+  height: 100%;
+  align-self: stretch;
+  background: var(--panel-orders);
+  padding: clamp(1rem, 2.2vw, 1.6rem) clamp(0.9rem, 2vw, 1.35rem);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.65rem, 1.4vw, 0.95rem);
+  overflow-y: auto;
+  border-radius: 0 14px 14px 0;
+  border-left: none;
+}
+
+.user-page__orders-title {
+  margin: 0;
+  font-size: clamp(1.15rem, 2.45vw, 1.65rem);
+  font-weight: 700;
+  color: var(--brown);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  text-align: center;
+}
+
+.user-page__orders-empty {
+  margin: 0;
+  font-size: clamp(0.9rem, 1.8vw, 1.2rem);
+  font-weight: 700;
+  color: var(--brown);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.user-page__orders-list {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.5rem, 1.1vw, 0.75rem);
+}
+
+.user-page__orders-list .shop-order-row {
+  min-height: clamp(2.8rem, 5vw, 3.6rem);
+}
+
+.user-page__orders-list .shop-order-row__name,
+.user-page__orders-list .shop-order-row__qty,
+.user-page__orders-list .shop-order-row__status {
+  font-size: clamp(0.82rem, 1.6vw, 1.05rem);
+}
+
+@media (max-width: 900px) {
+  .user-page__board {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 0;
+  }
+
+  .user-page__profile-group {
+    display: contents;
+  }
+
+  .user-page__profile {
+    flex: none;
+    width: 100%;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .user-page__stats {
+    height: auto;
+    border-radius: 0 0 14px 14px;
+  }
+
+  .user-page__orders {
+    flex: none;
+    height: auto;
+    border-radius: 14px;
+    border-left: 3px solid var(--brown);
+  }
+
+  .user-page__avatar {
+    width: clamp(4.5rem, 18vw, 6rem);
+  }
+}

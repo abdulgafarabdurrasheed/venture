@@ -1,0 +1,182 @@
+.journal-modal__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgba(61, 41, 20, 0.45);
+}
+
+.journal-modal {
+  position: relative;
+  width: min(36rem, 100%);
+  max-height: min(90vh, 48rem);
+  overflow-y: auto;
+  padding: 1.35rem 1.5rem 1.5rem;
+  border: 3px solid #3d2914;
+  border-radius: 16px;
+  background: #f5e6c8;
+  color: #3d2914;
+}
+
+.journal-modal--wide {
+  width: min(42rem, 100%);
+}
+
+.journal-modal__close {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.75rem;
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #3d2914;
+  cursor: pointer;
+}
+
+.journal-modal__title {
+  margin: 0 2rem 0.85rem 0;
+  font-size: 1.15rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.journal-modal__edit-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.journal-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.journal-modal__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.journal-modal__form input,
+.journal-modal__form textarea {
+  padding: 0.55rem 0.65rem;
+  border: 2px solid #3d2914;
+  border-radius: 8px;
+  background: #fff8e8;
+  color: #3d2914;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.journal-modal__form textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
+.journal-modal__cdn-hint,
+.journal-modal__hint {
+  margin: 0;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.4;
+}
+
+.journal-modal__cdn-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.journal-modal__cdn-input {
+  flex: 1;
+}
+
+.journal-modal__cdn-row button,
+.journal-modal__submit,
+.journal-modal__cancel-edit,
+.journal-modal__edit-btn {
+  padding: 0.5rem 0.9rem;
+  border: 2px solid #3d2914;
+  border-radius: 10px;
+  background: #edd9b8;
+  color: #3d2914;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.journal-modal__cancel-edit {
+  background: #fff8e8;
+}
+
+.journal-modal__error {
+  margin: 0;
+  color: #8b2e2e;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.journal-modal__list h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+}
+
+.journal-modal__empty {
+  margin: 0;
+  opacity: 0.8;
+}
+
+.journal-modal__entry {
+  padding: 0.75rem 0;
+  border-top: 1px solid rgba(61, 41, 20, 0.2);
+}
+
+.journal-modal__entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.journal-modal__edit-btn {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.journal-modal__entry small {
+  display: block;
+  margin-top: 0.35rem;
+  opacity: 0.85;
+}
+
+.journal-modal .journal-description {
+  line-height: 1.45;
+}
+
+.journal-modal .journal-media-item {
+  display: block;
+  max-width: 100%;
+  margin: 0.5rem 0;
+  border-radius: 8px;
+}
+
+.journal-modal .journal-media-fallback,
+.journal-modal .journal-media-loading {
+  display: block;
+  margin: 0.35rem 0;
+  font-size: 0.85rem;
+  opacity: 0.8;
+}

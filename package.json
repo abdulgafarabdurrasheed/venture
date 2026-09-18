@@ -1,0 +1,33 @@
+{
+  "name": "off-track",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=client",
+    "dev:server": "node --watch server/index.js",
+    "dev:full": "concurrently -n client,server -c blue,green \"npm run dev --workspace=client\" \"npm run dev:server\"",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "node server/migrate.js",
+    "db:setup": "npm run db:up && sleep 3 && npm run db:migrate",
+    "build": "npm run build --workspace=client",
+    "preview": "npm run preview --workspace=client",
+    "start": "NODE_ENV=production node server/index.js"
+  },
+  "dependencies": {
+    "airtable": "^0.12.2",
+    "cookie-parser": "^1.4.7",
+    "csurf": "^1.11.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.5.2",
+    "express-session": "^1.18.1",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

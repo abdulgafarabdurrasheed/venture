@@ -1,0 +1,120 @@
+.ship-countdown {
+  margin-bottom: clamp(0.75rem, 2vw, 1.1rem);
+  padding: 0.65rem 0.85rem;
+  border: 2px solid #3d2914;
+  border-radius: 12px;
+  background: rgba(245, 230, 200, 0.92);
+  color: #3d2914;
+}
+
+.ship-countdown__heading {
+  margin: 0 0 0.45rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.6rem;
+}
+
+.ship-countdown__label {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.ship-countdown__note {
+  font-size: 0.82rem;
+  opacity: 0.85;
+}
+
+.ship-countdown__timer {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.ship-countdown__unit {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 2.5rem;
+  text-align: center;
+}
+
+.ship-countdown__num {
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ship-countdown__unit-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.8;
+}
+
+.ship-countdown__sep {
+  font-size: 1.1rem;
+  font-weight: 700;
+  opacity: 0.65;
+  padding-bottom: 0.55rem;
+}
+
+/* Compact variant — left of profile bar */
+.ship-countdown--bar {
+  margin: 0;
+  padding: 0.4rem 0.55rem;
+  border-radius: 9px;
+  line-height: 1.1;
+  max-width: min(11rem, 32vw);
+}
+
+.ship-countdown--bar .ship-countdown__heading {
+  margin: 0 0 0.2rem;
+  gap: 0;
+}
+
+.ship-countdown--bar .ship-countdown__label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.15;
+}
+
+.ship-countdown--bar .ship-countdown__timer {
+  gap: 0.1rem;
+}
+
+.ship-countdown--bar .ship-countdown__unit {
+  min-width: 1.65rem;
+  gap: 0.02rem;
+}
+
+.ship-countdown--bar .ship-countdown__num {
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.ship-countdown--bar .ship-countdown__unit-label {
+  font-size: 0.56rem;
+  letter-spacing: 0.02em;
+}
+
+.ship-countdown--bar .ship-countdown__sep {
+  font-size: 0.78rem;
+  padding-bottom: 0.42rem;
+}
+
+@media (max-width: 640px) {
+  .ship-countdown--bar {
+    max-width: min(10rem, 38vw);
+    padding: 0.32rem 0.45rem;
+  }
+
+  .ship-countdown--bar .ship-countdown__label {
+    font-size: 0.62rem;
+  }
+
+  .ship-countdown--bar .ship-countdown__num {
+    font-size: 0.8rem;
+  }
+}

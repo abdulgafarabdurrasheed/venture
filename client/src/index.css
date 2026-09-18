@@ -1,0 +1,58 @@
+@font-face {
+  font-family: "Iosevka Charon";
+  src: url("../../fonts/Iosevka_Charon/IosevkaCharon-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Iosevka Charon";
+  src: url("../../fonts/Iosevka_Charon/IosevkaCharon-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Iosevka Charon";
+  src: url("../../fonts/Iosevka_Charon/IosevkaCharon-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Iosevka Charon";
+  src: url("../../fonts/Iosevka_Charon/IosevkaCharon-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "Iosevka Charon", ui-monospace, monospace;
+  background: #c4a574 url("../../imgs/common_to_pages/single_bkg.png") center / cover no-repeat fixed;
+  color: #3d2914;
+  overflow-x: clip;
+}
+
+@media (max-width: 1023px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+}

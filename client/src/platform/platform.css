@@ -1,0 +1,181 @@
+.platform-page {
+  font-family: system-ui, sans-serif;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  color: #111;
+}
+
+.platform-page h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.75rem;
+}
+
+.platform-page p {
+  line-height: 1.5;
+}
+
+.platform-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.25rem 0 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.platform-nav a {
+  color: #0b5cab;
+  text-decoration: none;
+}
+
+.platform-nav a:hover {
+  text-decoration: underline;
+}
+
+.platform-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: #f4f4f4;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.platform-status button {
+  margin-left: auto;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.platform-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  font-family: system-ui, sans-serif;
+  background: #f7f7f7;
+}
+
+.platform-gate__card {
+  width: min(420px, 100%);
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+.platform-gate__card h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+}
+
+.platform-gate__card form {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.platform-gate__card input {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.platform-gate__card button {
+  padding: 0.65rem 0.75rem;
+  border: none;
+  border-radius: 8px;
+  background: #111;
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.platform-gate__error {
+  color: #b00020;
+  margin: 0.5rem 0 0;
+}
+
+.platform-card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: #fafafa;
+}
+
+.platform-card h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.platform-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.platform-list li {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.platform-list li:last-child {
+  border-bottom: none;
+}
+
+.platform-muted {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.platform-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.platform-actions button,
+.platform-actions a.button {
+  display: inline-block;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+  text-decoration: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.platform-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.platform-pre {
+  overflow: auto;
+  max-height: 320px;
+  padding: 0.75rem;
+  background: #111;
+  color: #f5f5f5;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.app-auth-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  font-family: system-ui, sans-serif;
+}
