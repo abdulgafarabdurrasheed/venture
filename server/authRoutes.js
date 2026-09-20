@@ -39,6 +39,7 @@ import {
   upsertDevUser,
   upsertUserFromHackClub,
 } from "./users.js";
+import { getDefaultDevEmail } from "./env.js";
 
 const LOCAL_DEV_AUTH_COOKIE = "offtrack.local_user";
 const IS_PROD = process.env.NODE_ENV === "production";
@@ -373,7 +374,7 @@ export function createAuthRouter({ rateLimiter } = {}) {
     }
 
     const returnTo = normalizeReturnTo(req.query?.returnTo || "/projects");
-    const email = typeof req.query?.email === "string" ? req.query.email.trim() : "dev@localhost";
+    const email = typeof req.query?.email === "string" ? req.query.email.trim() : getDefaultDevEmail();
     const name = typeof req.query?.name === "string" ? req.query.name.trim() : "Dev User";
 
     try {
@@ -405,7 +406,7 @@ export function createAuthRouter({ rateLimiter } = {}) {
       return;
     }
 
-    const email = typeof req.body?.email === "string" ? req.body.email.trim() : "dev@localhost";
+    const email = typeof req.body?.email === "string" ? req.body.email.trim() : getDefaultDevEmail();
     const name = typeof req.body?.name === "string" ? req.body.name.trim() : "Dev User";
 
     try {

@@ -1,4 +1,5 @@
 import { pool } from "./db.js";
+import { getDefaultDevEmail } from "./env.js";
 import { slackDisplayNameFromProfile } from "./hackclubAuth.js";
 
 const DEFAULT_ROLE = "member";
@@ -359,7 +360,8 @@ export async function upsertDevUser({ email, name }) {
     throw new Error("DATABASE_URL is not set.");
   }
 
-  const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "dev@localhost";
+  const normalizedEmail =
+    typeof email === "string" ? email.trim().toLowerCase() : getDefaultDevEmail().toLowerCase();
   const displayName = typeof name === "string" && name.trim() ? name.trim() : "Dev User";
   const hackclubSub = `dev:${normalizedEmail}`;
   const role = resolveRole(normalizedEmail);

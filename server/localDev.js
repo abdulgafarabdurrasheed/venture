@@ -1,5 +1,6 @@
 import { isProduction } from "./security.js";
 import { buildSessionProfileSnapshot, upsertDevUser } from "./users.js";
+import { getDefaultDevEmail } from "./env.js";
 
 export function isLocalhostRequest(req) {
   const hostHeader = (req.get("X-Forwarded-Host") || req.get("Host") || "")
@@ -20,12 +21,7 @@ function localDevIdentity() {
     return { email: fromEnv.toLowerCase(), name: "Local Dev" };
   }
 
-  const superadmin = process.env.SUPERADMIN_EMAILS?.split(",")[0]?.trim().toLowerCase();
-  if (superadmin) {
-    return { email: superadmin, name: "Local Dev" };
-  }
-
-  return { email: "dev@localhost", name: "Dev User" };
+  return { email: getDefaultDevEmail().toLowerCase(), name: "Dev User" };
 }
 
 /** Localhost dev: auto-create a session so the platform works without OAuth or login UI. */
