@@ -3,6 +3,7 @@ import { loadCsrfToken } from "./api/client.js";
 import { AuthContext } from "./auth/AuthContext.jsx";
 import { Hero } from "./components/Hero.jsx";
 import { RulesPage } from "./components/RulesPage.jsx";
+import { RsvpPage } from "./components/RsvpPage.jsx";
 import { PlatformGate } from "./platform/PlatformGate.jsx";
 import { AdminAirtableSyncPage } from "./pages/AdminAirtableSyncPage.jsx";
 import { AdminPage } from "./pages/AdminPage.jsx";
@@ -19,7 +20,7 @@ import { ShopPage } from "./pages/ShopPage.jsx";
 import { TestPage } from "./pages/TestPage.jsx";
 import { UserAreaPage } from "./pages/UserAreaPage.jsx";
 
-const PUBLIC_PATHS = new Set(["/", "/rules"]);
+const PUBLIC_PATHS = new Set(["/", "/rules", "/rsvp"]);
 const PLATFORM_DEFAULT = "/projects";
 
 const PLATFORM_PATHS = new Set([
@@ -131,6 +132,9 @@ export default function App() {
     if (isJournalingPath) {
       const [, , projectId, token] = pathname.split("/");
       return <JournalingReviewPage projectId={projectId} token={token} />;
+    }
+    if (pathname === "/rsvp") {
+      return <RsvpPage />;
     }
     if (pathname === "/rules") {
       return <RulesPage />;

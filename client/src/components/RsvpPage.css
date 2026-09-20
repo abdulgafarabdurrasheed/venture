@@ -1,0 +1,92 @@
+.rsvp__btn {
+  display: inline-block;
+  padding: 1rem 2.5rem;
+  font-family: "Iosevka Charon", ui-monospace, monospace;
+  font-size: clamp(1.5rem, 2.2vw, 2rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: #f5e6c8;
+  background: #3d2914;
+  border: 3px solid #3d2914;
+}
+
+.rsvp__btn:hover {
+  background: #5c4228;
+  border-color: #5c4228;
+  color: #fff;
+}
+
+.rsvp__slack-link {
+  display: inline-block;
+  font-family: "Iosevka Charon", ui-monospace, monospace;
+  font-size: clamp(1rem, 1.4vw, 1.25rem);
+  font-weight: 600;
+  color: #1a5a9e;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.rsvp__slack-link:hover {
+  color: #0e3d6e;
+}
+
+.section-faq__heading-text {
+  position: relative;
+  z-index: 2;
+  margin: 0 0 clamp(2rem, 5vh, 3.5rem);
+  font-family: "Iosevka Charon", ui-monospace, monospace;
+  font-size: clamp(3rem, 4.5vw, 4.5rem);
+  font-weight: 700;
+  color: #3d2914;
+  text-align: center;
+}
+
+.section-faq__icons-row {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  gap: clamp(1rem, 3vw, 2.5rem);
+  margin-top: clamp(2rem, 5vh, 4rem);
+  pointer-events: none;
+}
+
+.rsvp__footer {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.rsvp__footer-heading {
+  margin: 0;
+  font-family: "Iosevka Charon", ui-monospace, monospace;
+  font-size: clamp(2.5rem, 4vw, 3.75rem);
+  font-weight: 700;
+  color: #3d2914;
+}
+
+.rsvp__footer-text {
+  margin: 0;
+  font-family: "Iosevka Charon", ui-monospace, monospace;
+  font-size: clamp(1.2rem, 1.8vw, 1.6rem);
+  font-weight: 400;
+  color: #5c4228;
+}
+
+.rsvp__footer-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}

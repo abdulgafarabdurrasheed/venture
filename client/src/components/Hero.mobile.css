@@ -88,6 +88,11 @@
     margin-bottom: 1.25rem;
   }
 
+  .hero__characters {
+    width: min(94vw, 420px);
+    justify-self: center;
+  }
+
   .hero__tagline strong,
   .section-whats__text strong {
     -webkit-text-stroke: 1.5px var(--brown);
@@ -204,9 +209,16 @@
   }
 
   .section-ship__row--top .section-ship__list-wrap {
+    grid-column: auto;
+    grid-row: auto;
     margin-right: 0;
     padding-left: 0;
     padding-top: 0;
+  }
+
+  .section-ship__row--top .section-ship__tent {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .section-ship__characters {
@@ -267,7 +279,7 @@
 
   .section-faq {
     /* Hold FAQ/slack place while steps move down */
-    margin-top: clamp(2.5rem, 7vh, 4.5rem);
+    margin-top: clamp(-1.5rem, -3vh, -0.5rem);
     padding: clamp(2rem, 6vh, 3rem) max(env(safe-area-inset-right, 0px), 1rem)
       clamp(2.5rem, 8vh, 4rem) max(env(safe-area-inset-left, 0px), 1rem);
     max-width: 100%;

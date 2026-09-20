@@ -324,6 +324,15 @@
   padding-top: clamp(1.25rem, 3.5vh, 2.5rem);
 }
 
+.hero__characters {
+  align-self: center;
+  justify-self: start;
+  width: min(42vw, 560px);
+  height: auto;
+  display: block;
+  filter: drop-shadow(6px 10px 16px rgba(61, 41, 20, 0.12));
+}
+
 .hero__headline {
   margin: 0 0 1rem;
   font-family: var(--font);
@@ -532,6 +541,7 @@
   max-width: 1400px;
   margin: clamp(2.5rem, 5.5vh, 4.5rem) auto 0;
   padding: clamp(0.5rem, 1.5vh, 1rem) clamp(1.5rem, 4vw, 3.5rem) clamp(2rem, 5vh, 4rem);
+  background: var(--cream);
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
@@ -549,6 +559,17 @@
   align-items: center;
 }
 
+.section-ship__row--top .section-ship__tent {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+}
+
+.section-ship__row--top .section-ship__list-wrap {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .section-ship__row--top .section-ship__characters {
   margin-left: clamp(-2rem, -4vw, -0.75rem);
 }
@@ -561,6 +582,10 @@
 
 .section-ship__row--bottom {
   align-items: flex-end;
+}
+
+.section-ship__row--bottom .section-ship__list-wrap {
+  grid-column: 1;
 }
 
 .section-ship__characters {
@@ -672,7 +697,7 @@
   min-height: auto;
   width: 100%;
   max-width: 1050px;
-  margin: clamp(6rem, 12vh, 8.5rem) auto 0;
+  margin: clamp(-3rem, -5vh, -1rem) auto 0;
   padding: clamp(3rem, 7vh, 5rem) clamp(1.5rem, 4vw, 3.5rem) clamp(4rem, 10vh, 8rem);
 }
 
@@ -956,7 +981,6 @@
   }
 
   .section-faq {
-    margin-top: clamp(6rem, 12vh, 8.5rem);
     padding-top: clamp(3.5rem, 8vh, 5.5rem);
     max-width: 1100px;
   }
