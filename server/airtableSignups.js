@@ -29,7 +29,7 @@ const F = {
   program: "Program",
 };
 
-const PROGRAM_NAME = "Off-Track";
+const PROGRAM_NAME = "Venture";
 
 const airtableToken =
   process.env.AIRTABLE_TOKEN || process.env.AIRTABLE_API_KEY || process.env.AIRTABLE_PERSONAL_ACCESS_TOKEN;

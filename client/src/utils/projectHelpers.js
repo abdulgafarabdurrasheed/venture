@@ -244,7 +244,7 @@ function hoursRequiredToShip(project) {
 
 export function getShipLockReason(project) {
   if (isShippingClosed()) {
-    return "Shipping has closed for Off-Track.";
+    return "Shipping has closed for Venture.";
   }
   if (project.blocked) {
     return "This project has been blocked and cannot be shipped again.";

@@ -15,7 +15,7 @@ export function journalShareToken(projectId) {
   if (!secret) return "";
   return crypto
     .createHmac("sha256", secret)
-    .update(`off-track:journaling:${String(projectId)}`)
+    .update(`venture:journaling:${String(projectId)}`)
     .digest("base64url");
 }
 

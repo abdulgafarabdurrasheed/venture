@@ -35,7 +35,7 @@ export function PlatformGate({ onUnlocked }) {
   return (
     <div className="platform-gate">
       <div className="platform-gate__card">
-        <h1>Off-Track Platform</h1>
+        <h1>Venture Platform</h1>
         <p className="platform-muted">This area is password-protected while we build it out.</p>
         <form onSubmit={handleSubmit}>
           <label htmlFor="platform-password">Access password</label>

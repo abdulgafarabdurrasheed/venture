@@ -11,7 +11,7 @@ import "./Hero.css";
 import "./Hero.mobile.css";
 import "./RsvpPage.css";
 
-const RSVP_URL = "https://rsvp.hackclub.community/ship4trip";
+const RSVP_URL = "https://rsvp.soon.it/ship4trip";
 const SLACK_CHANNEL_URL =
   "https://app.slack.com/client/E09V59WQY1E/C0C2X6470BV";
 
@@ -71,7 +71,7 @@ const FAQ_ITEMS = [
 
 export function RsvpPage() {
   return (
-    <section className="hero" aria-label="Ship4Trip RSVP">
+    <section className="hero" aria-label="Venture RSVP">
       <img
         className="hero__page-bkg"
         src={pageBkg}

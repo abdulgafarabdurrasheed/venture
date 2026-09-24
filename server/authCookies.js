@@ -1,8 +1,8 @@
 import crypto from "crypto";
 import { isProduction } from "./security.js";
 
-export const PROD_AUTH_USER_COOKIE = "offtrack.auth_user";
-export const PROD_PLATFORM_UNLOCK_COOKIE = "offtrack.platform_unlock";
+export const PROD_AUTH_USER_COOKIE = "venture.auth_user";
+export const PROD_PLATFORM_UNLOCK_COOKIE = "venture.platform_unlock";
 
 const COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const IS_PROD = process.env.NODE_ENV === "production";

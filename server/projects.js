@@ -453,7 +453,7 @@ export async function acknowledgeHoursReductionWarnings(userId, feedbackIds = []
   return { acknowledged: result.rowCount ?? 0 };
 }
 
-/** Sum of journal + Hackatime hours across all Off-Track projects for a user. */
+/** Sum of journal + Hackatime hours across all Venture projects for a user. */
 export async function getLoggedHoursForUser(userId) {
   if (!pool) return 0;
 
@@ -569,7 +569,7 @@ export async function shipProjectForUser(userId, projectId, { reshipUpdate } = {
   }
 
   if (isShippingClosed()) {
-    throw new Error("Shipping has closed for Off-Track.");
+    throw new Error("Shipping has closed for Venture.");
   }
 
   const missing = getShipMissingRequirements(project);

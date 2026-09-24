@@ -389,13 +389,13 @@ export function ProjectFormModal({
           )}
           {previewHackatimeHours > 0 ? (
             <p className="project-modal__hackatime-summary">
-              Selected Hackatime: {formatHours(previewHackatimeHours)} h (since Off-Track launch)
+              Selected Hackatime: {formatHours(previewHackatimeHours)} h (since Venture launch)
             </p>
           ) : hackatimeConnected && hackatimeProjects.length > 0 ? (
             <p className="project-modal__hackatime-summary project-modal__hackatime-summary--muted">
               {stackLaunched
                 ? "Select at least one Hackatime project above to count your coding time."
-                : "You can link Hackatime projects now. Hours count toward Off-Track starting June 5."}
+                : "You can link Hackatime projects now. Hours count toward Venture starting June 5."}
             </p>
           ) : null}
         </fieldset>

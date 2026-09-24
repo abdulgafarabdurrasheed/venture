@@ -73,10 +73,10 @@ const FAQ_ITEMS = [
     ),
   },
   {
-    question: "When will Off-Track end?",
+    question: "When will Venture end?",
     answer: (
       <>
-        Off-Track runs from <strong>June 15 to July 15</strong>. Dates are subject to change.
+        Venture runs from <strong>June 15 to July 15</strong>. Dates are subject to change.
       </>
     ),
   },
@@ -92,7 +92,7 @@ export function Hero() {
     oauth_config: "Login is not configured. Contact the organizers.",
     oauth_denied: "Login was cancelled.",
     oauth_callback: "Login failed. Please try again.",
-    database_missing: "Local database is missing. Run: createdb -U postgres off-track_local",
+    database_missing: "Local database is missing. Run: createdb -U postgres venture_local",
     database_not_configured: "DATABASE_URL is not set in .env",
     dev_signup: "Signup failed. Check the server logs.",
   };
@@ -110,7 +110,7 @@ export function Hero() {
   }, []);
 
   return (
-    <section className="hero" aria-label="Off Track landing">
+    <section className="hero" aria-label="Venture landing">
       <img
         className="hero__page-bkg"
         src={pageBkg}
@@ -147,7 +147,7 @@ export function Hero() {
 
         <div className="hero__main">
           <div className="hero__title-wrap">
-            <img className="hero__title" src={titleImg} width={1011} height={560} alt="Off-Track" />
+            <img className="hero__title" src={titleImg} width={1011} height={560} alt="Venture" />
             <p className="hero__dates" aria-label="Program dates">
               June 15th - July 15th
             </p>
@@ -212,7 +212,7 @@ export function Hero() {
             src={characters}
             width={1068}
             height={883}
-            alt="Off-Track characters"
+            alt="Adventure characters"
           />
           <div className="section-ship__list-wrap">
             <h2 id="you-ship-heading" className="section-ship__heading">

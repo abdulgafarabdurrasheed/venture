@@ -13,11 +13,11 @@ import "./RulesPage.mobile.css";
 
 export function RulesPage() {
   return (
-    <main className="rules-page" aria-label="Off-Track project ship rules">
+    <main className="rules-page" aria-label="Venture project ship rules">
       <img className="rules-page__background" src={pageBkg} alt="" aria-hidden="true" />
 
       <header className="rules-page__top">
-        <a href="/" aria-label="Back to Off-Track home">
+        <a href="/" aria-label="Back to Venture home">
           <img className="rules-page__logo" src={hcLogo} width={281} height={158} alt="Hack Club" />
         </a>
         <nav className="rules-page__top-nav" aria-label="Rules page">
@@ -153,7 +153,7 @@ export function RulesPage() {
             </p>
           </aside>
           <p className="rules-page__callout">
-            Not sure if your add-on art will count? Ask first in the Off-Track{" "}
+            Not sure if your add-on art will count? Ask first in the Venture{" "}
             <a href={SLACK_HELP_URL} target="_blank" rel="noopener noreferrer">
               Slack help channel
             </a>
@@ -181,7 +181,7 @@ export function RulesPage() {
             </li>
           </ul>
           <p>
-            Log entries from the <strong>Journal</strong> button on any project in the Off-Track
+            Log entries from the <strong>Journal</strong> button on any project in the Venture
             platform. Upload media via <strong>#cdn</strong> on Slack, then paste the link into your
             entry description.
           </p>
@@ -246,7 +246,7 @@ export function RulesPage() {
         <section id="questions" className="rules-page__card rules-page__help">
           <h2>Still Have Questions?</h2>
           <p>
-            Ask in the <strong>Off-Track Slack channels</strong> below, or read the quick <strong>FAQ</strong> there.
+            Ask in the <strong>Venture Slack channels</strong> below, or read the quick <strong>FAQ</strong> there.
           </p>
           <a href={SLACK_FAQ_URL} target="_blank" rel="noopener noreferrer">
             Open FAQ
@@ -259,8 +259,8 @@ export function RulesPage() {
       <a className="rules-page__back" href="/" aria-label="Back to home">
         ← Back home
       </a>
-      <a className="rules-page__brand" href="/" aria-label="Off-Track home">
-        <img src={titleImg} width={1011} height={560} alt="Off-Track" />
+      <a className="rules-page__brand" href="/" aria-label="Venture home">
+        <img src={titleImg} width={1011} height={560} alt="Venture" />
       </a>
     </main>
   );
