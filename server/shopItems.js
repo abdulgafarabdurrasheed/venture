@@ -20,6 +20,7 @@ const SHOP_ITEM_COLUMNS = [
   "position",
   "frame_label",
   "frame_label_color",
+  "required_stars",
 ];
 
 const REMOVED_SHOP_ITEM_COLUMNS = [
@@ -54,7 +55,8 @@ export async function ensureShopItemsTable() {
       price_usd NUMERIC(10, 2),
       discount_percent NUMERIC(5, 2),
       airtable_id VARCHAR,
-      synced_at DATE
+      synced_at DATE,
+      required_stars INTEGER NOT NULL DEFAULT 0
     )
   `);
 
@@ -205,6 +207,7 @@ async function ensureShopItemColumn(column) {
     position: "INTEGER NOT NULL DEFAULT 0",
     frame_label: "VARCHAR",
     frame_label_color: "VARCHAR NOT NULL DEFAULT 'green'",
+    required_stars: "INTEGER NOT NULL DEFAULT 0",
   };
 
   await pool.query(`ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS ${column} ${columnDefinitions[column]}`);
@@ -243,11 +246,11 @@ export async function createShopItem(input) {
     `
       INSERT INTO shop_items (
         name, price, item_link, image_url, description, active, max_per_person,
-        price_usd, discount_percent, airtable_id, synced_at, position, frame_label, frame_label_color,
+        price_usd, discount_percent, airtable_id, synced_at, required_stars, position, frame_label, frame_label_color,
         created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13, $14, NOW(), NOW()
+        $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW()
       )
       RETURNING *
     `,
@@ -296,11 +299,12 @@ export async function updateShopItem(id, input) {
         discount_percent = $9,
         airtable_id = $10,
         synced_at = $11,
-        position = $12,
-        frame_label = $13,
-        frame_label_color = $14,
+        required_stars = $12,
+        position = $13,
+        frame_label = $14,
+        frame_label_color = $15,
         updated_at = NOW()
-      WHERE id = $15
+      WHERE id = $16
       RETURNING *
     `,
     [...shopItemValues(values), position, values.frameLabel, values.frameLabelColor, id]
@@ -405,6 +409,14 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
     );
     const item = itemResult.rows[0];
     if (!item) throw new Error("Shop item not found.");
+
+    const currentUserResult = await client.query("SELECT total_stars, coins FROM users WHERE id = $1", [userId]);
+    const user = currentUserResult.rows[0];
+    if (!user) throw new Error("User not found.");
+
+    if (item.required_stars > 0 && user.total_stars < item.required_stars) {
+      throw new Error(`This item requires ${item.required_stars} star(s) to unlock. You have ${user.total_stars}.`);
+    }
 
     if (item.max_per_person) {
       const countResult = await client.query(
@@ -512,6 +524,7 @@ function normalizeShopItemInput(input = {}) {
     syncedAt: dateOrNull(input.syncedAt ?? input.synced_at),
     position: integerOrNull(input.position),
     frameLabel: textOrNull(input.frameLabel ?? input.frame_label),
+    requiredStars: integerOrNull(input.requiredStars ?? input.required_stars) || 0,
     frameLabelColor: normalizeShopLabelColor(input.frameLabelColor ?? input.frame_label_color),
   };
 }
@@ -529,6 +542,7 @@ function shopItemValues(item) {
     item.discountPercent,
     item.airtableId,
     item.syncedAt,
+    item.requiredStars,
   ];
 }
 
@@ -798,6 +812,7 @@ function toPublicShopItem(row) {
     position: row.position ?? 0,
     frameLabel: row.frame_label,
     frameLabelColor: normalizeShopLabelColor(row.frame_label_color),
+    requiredStars: Number(row.required_stars ?? 0),
     frameLabelHex: shopLabelColorHex(row.frame_label_color),
   };
 }
