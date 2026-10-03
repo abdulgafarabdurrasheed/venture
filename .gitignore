@@ -7,7 +7,7 @@ server/uploads/
 
 .env
 .env.*
-.env.example
+!.env.example
 
 *.log
 .cache/
