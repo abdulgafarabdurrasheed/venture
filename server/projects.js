@@ -1195,8 +1195,28 @@ export async function deleteProjectBySuperadmin(projectId) {
   await deleteProjectFromAirtable(row);
   await deleteProjectSubmissionsFromYsws(projectId);
 
-  const result = await pool.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
-  return result.rowCount > 0;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    
+    // Claw back any coins earned by this project before deleting it
+    if (row.coins_earned && Number(row.coins_earned) > 0) {
+      await client.query(
+        "UPDATE users SET coins = GREATEST(0, coins - $1), updated_at = NOW() WHERE id = $2",
+        [row.coins_earned, row.user_id]
+      );
+    }
+    
+    const result = await client.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+    
+    await client.query("COMMIT");
+    return result.rowCount > 0;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function deleteProjectForUser(userId, projectId) {
