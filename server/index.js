@@ -1,4 +1,5 @@
 import "./env.js";
+import { getUnreadNotifications, markNotificationRead } from "./notifications.js";
 import cookieParser from "cookie-parser";
 import { randomUUID } from "crypto";
 import express from "express";
@@ -324,6 +325,29 @@ app.get("/api/user/dashboard", requireUser, async (req, res) => {
   } catch (error) {
     console.error("Failed to load user dashboard:", error);
     res.status(500).json({ error: "Failed to load user dashboard." });
+  }
+});
+
+app.get("/api/notifications", requireUser, async (req, res) => {
+  try {
+    const notifications = await getUnreadNotifications(req.session.userId);
+    res.json(notifications);
+  } catch (error) {
+    console.error("Failed to load notifications:", error);
+    res.status(500).json({ error: "Failed to load notifications." });
+  }
+});
+
+app.post("/api/notifications/:id/read", requireUser, async (req, res) => {
+  try {
+    const success = await markNotificationRead(req.session.userId, req.params.id);
+    if (!success) {
+      return res.status(404).json({ error: "Notification not found or already read." });
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to mark notification read:", error);
+    res.status(500).json({ error: "Failed to update notification." });
   }
 });
 

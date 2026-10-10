@@ -1,3 +1,4 @@
+import { insertNotification } from "./notifications.js";
 import { isShippingClosed } from "./shipDeadlines.js";
 import { pool } from "./db.js";
 import { deleteProjectFromAirtable, persistProjectAirtableRecordId, syncProjectToAirtable } from "./airtableProjects.js";
@@ -829,6 +830,13 @@ export async function approveAdminReviewProject(adminId, projectId, input = {}) 
     });
     await client.query("COMMIT");
 
+    await insertNotification(
+      project.user_id,
+      'project_approved',
+      `Your project "${project.name}" has been approved! You earned ${coinsDelta} coins.`,
+      { projectId, coinsEarned: coinsDelta, approvedHours }
+    );
+
     await trySyncProjectToAirtable(approvedRow.id);
     await trySubmitProjectToYsws(approvedRow.id);
 
@@ -920,6 +928,16 @@ async function finalizeAdminReviewRemoval(adminId, projectId, input = {}, { cons
     await client.query("COMMIT");
 
     const row = result.rows[0];
+    
+    await insertNotification(
+      project.user_id,
+      consumePendingHours ? 'project_rejected' : 'project_returned',
+      consumePendingHours
+        ? `Your project "${project.name}" requires changes before approval. Check the feedback.`
+        : `Your project "${project.name}" was returned from the queue.`,
+      { projectId: row.id }
+    );
+
     await trySyncProjectToAirtable(row.id);
     await trySubmitProjectToYsws(row.id);
     return toPublicProject(row);
