@@ -63,6 +63,7 @@ export async function ensureProjectsTable() {
       approved_hours NUMERIC(10, 2) NOT NULL DEFAULT 0,
       past_approved_hours NUMERIC(10, 2) NOT NULL DEFAULT 0,
       coins_earned NUMERIC(10, 2) NOT NULL DEFAULT 0,
+      stars INTEGER NOT NULL DEFAULT 0,
       admin_feedback TEXT,
       hour_justification TEXT,
       reviewed_at TIMESTAMPTZ,
@@ -99,6 +100,7 @@ export async function ensureProjectsTable() {
     approved_hours: "NUMERIC(10, 2) NOT NULL DEFAULT 0",
     past_approved_hours: "NUMERIC(10, 2) NOT NULL DEFAULT 0",
     coins_earned: "NUMERIC(10, 2) NOT NULL DEFAULT 0",
+    stars: "INTEGER NOT NULL DEFAULT 0",
     admin_feedback: "TEXT",
     hour_justification: "TEXT",
     reviewed_at: "TIMESTAMPTZ",
@@ -1984,6 +1986,7 @@ function toPublicProject(row) {
     approvedHours: Number(row.approved_hours ?? 0),
     pastApprovedHours: approvedBankedHours(row),
     coinsEarned: Number(row.coins_earned ?? 0),
+    stars: Number(row.stars ?? 0),
     adminFeedback: row.admin_feedback,
     hourJustification: row.hour_justification,
     reviewedAt: row.reviewed_at,
@@ -2121,3 +2124,42 @@ function toIsoString(value) {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
+
+export async function awardStarsToProject(adminId, projectId, stars) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+  
+  if (!Number.isInteger(stars) || stars < 0 || stars > 5) {
+    throw new Error("Stars must be an integer between 0 and 5.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const projectResult = await client.query("SELECT * FROM projects WHERE id = $1 FOR UPDATE", [projectId]);
+    const project = projectResult.rows[0];
+    if (!project) throw new Error("Project not found.");
+
+    const starDiff = stars - (project.stars || 0);
+
+    const updatedProjectResult = await client.query(
+      `UPDATE projects SET stars = $1, updated_at = NOW() WHERE id = $2 RETURNING *, total_hours AS journal_hours`,
+      [stars, projectId]
+    );
+
+    if (starDiff !== 0) {
+      await client.query(
+        `UPDATE users SET total_stars = total_stars + $1, updated_at = NOW() WHERE id = $2`,
+        [starDiff, project.user_id]
+      );
+    }
+
+    await client.query("COMMIT");
+    return toPublicProject(updatedProjectResult.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}

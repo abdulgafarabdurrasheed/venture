@@ -37,6 +37,7 @@ export async function ensureUsersTable() {
       verification_status TEXT,
       role TEXT NOT NULL DEFAULT '${DEFAULT_ROLE}',
       coins NUMERIC(10, 2) NOT NULL DEFAULT 0,
+      total_stars INTEGER NOT NULL DEFAULT 0,
       access_token TEXT,
       refresh_token TEXT,
       token_type TEXT,
@@ -62,6 +63,7 @@ export async function ensureUsersTable() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_status TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS coins NUMERIC(10, 2) NOT NULL DEFAULT 0`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS total_stars INTEGER NOT NULL DEFAULT 0`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS access_token TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_type TEXT`);

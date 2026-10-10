@@ -46,7 +46,7 @@ import {
   updateShopItem,
 } from "./shopItems.js";
 import {
-  approveAdminReviewProject,
+  approveAdminReviewProject, awardStarsToProject,
   blockAdminReviewProject,
   createProjectForUser,
   getProjectForUser,
@@ -779,6 +779,16 @@ app.get("/api/admin/review/projects/:id", requireStaffReview, async (req, res) =
   } catch (error) {
     console.error("Failed to load review project:", error);
     res.status(500).json({ error: "Failed to load review project." });
+  }
+});
+
+app.post("/api/admin/review/projects/:id/star", requireStaffReview, async (req, res) => {
+  try {
+    const { stars } = req.body;
+    const project = await awardStarsToProject(req.session.userId, req.params.id, Number(stars));
+    res.json(project);
+  } catch (error) {
+    res.status(400).json({ error: clientErrorMessage(error) });
   }
 });
 
