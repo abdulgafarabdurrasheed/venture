@@ -305,6 +305,47 @@
   color: #f7cf57;
 }
 
+.admin-review-stars > p {
+  margin: 0.4rem 0 0.75rem;
+  color: rgba(245, 230, 200, 0.82);
+}
+
+.admin-review-stars__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.admin-review-stars__controls label {
+  display: grid;
+  gap: 0.35rem;
+  color: rgba(245, 230, 200, 0.82);
+  font-weight: 700;
+}
+
+.admin-review-stars__controls select {
+  min-width: 6rem;
+  padding: 0.6rem 0.75rem;
+  border: 2px solid #8b6239;
+  border-radius: 8px;
+  background: #f5e6c8;
+  color: #3d2914;
+  font: inherit;
+  font-weight: 700;
+}
+
+.admin-review-stars__save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.admin-review-stars__current {
+  font-size: 0.9rem;
+}
+
 .admin-review-time-row {
   display: flex;
   align-items: flex-start;
