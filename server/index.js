@@ -48,6 +48,7 @@ import {
 import {
   approveAdminReviewProject, awardStarsToProject,
   blockAdminReviewProject,
+  claimProjectForReview,
   createProjectForUser,
   getProjectForUser,
   createJournalEntryForUser,
@@ -55,6 +56,8 @@ import {
   deleteProjectForUser,
   deleteProjectBySuperadmin,
   getAdminReviewProject,
+  heartbeatProjectReviewClaim,
+  escalateProjectReview,
   getJournalEntriesCsv,
   listJournalEntriesForUserProject,
   listAdminReviewProjects,
@@ -67,6 +70,7 @@ import {
   listHoursReductionWarningsForUser,
   acknowledgeHoursReductionWarnings,
   rejectAdminReviewProject,
+  releaseProjectReviewClaimForReviewer,
   removeFromQueueAdminReviewProject,
   shipProjectForUser,
   syncAllProjectHoursForUser,
@@ -760,7 +764,12 @@ app.get("/api/admin/review/media", requireStaffReview, async (req, res) => {
 
 app.get("/api/admin/review/projects", requireStaffReview, async (req, res) => {
   try {
-    const review = await listAdminReviewProjects({ shipSort: req.query.shipSort });
+    const userRow = await getUserById(req.session.userId);
+    const review = await listAdminReviewProjects({
+      shipSort: req.query.shipSort,
+      viewerId: req.session.userId,
+      includeEscalated: canAccessFullAdmin(effectiveRole(userRow)),
+    });
     res.json(review);
   } catch (error) {
     console.error("Failed to load review projects:", error);
@@ -770,7 +779,7 @@ app.get("/api/admin/review/projects", requireStaffReview, async (req, res) => {
 
 app.get("/api/admin/review/projects/:id", requireStaffReview, async (req, res) => {
   try {
-    const reviewProject = await getAdminReviewProject(req.params.id);
+    const reviewProject = await getAdminReviewProject(req.params.id, req.session.userId);
     if (!reviewProject) {
       res.status(404).json({ error: "Project not found." });
       return;
@@ -779,6 +788,57 @@ app.get("/api/admin/review/projects/:id", requireStaffReview, async (req, res) =
   } catch (error) {
     console.error("Failed to load review project:", error);
     res.status(500).json({ error: "Failed to load review project." });
+  }
+});
+
+app.post("/api/admin/review/projects/:id/claim", requireStaffReview, async (req, res) => {
+  try {
+    const userRow = await getUserById(req.session.userId);
+    const result = await claimProjectForReview(req.session.userId, req.params.id, {
+      canHandleEscalation: canAccessFullAdmin(effectiveRole(userRow)),
+    });
+    res.status(result.claimed ? 200 : 409).json(result);
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ error: error.message || "Failed to claim review." });
+  }
+});
+
+app.post("/api/admin/review/projects/:id/claim/takeover", requireFullAdmin, async (req, res) => {
+  try {
+    const result = await claimProjectForReview(req.session.userId, req.params.id, {
+      force: true,
+      canHandleEscalation: true,
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ error: error.message || "Failed to take over review." });
+  }
+});
+
+app.post("/api/admin/review/projects/:id/claim/heartbeat", requireStaffReview, async (req, res) => {
+  try {
+    const result = await heartbeatProjectReviewClaim(req.session.userId, req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to refresh review claim." });
+  }
+});
+
+app.delete("/api/admin/review/projects/:id/claim", requireStaffReview, async (req, res) => {
+  try {
+    const result = await releaseProjectReviewClaimForReviewer(req.session.userId, req.params.id);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Failed to release review claim." });
+  }
+});
+
+app.post("/api/admin/review/projects/:id/escalate", requireStaffReview, async (req, res) => {
+  try {
+    const result = await escalateProjectReview(req.session.userId, req.params.id, req.body);
+    res.json(result);
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ error: error.message || "Failed to escalate review." });
   }
 });
 
@@ -798,7 +858,7 @@ app.post("/api/admin/review/projects/:id/approve", requireStaffReview, async (re
     res.json(result);
   } catch (error) {
     console.error("Failed to approve review project:", error);
-    res.status(400).json({ error: error.message || "Failed to approve project." });
+    res.status(error.statusCode || 400).json({ error: error.message || "Failed to approve project." });
   }
 });
 
@@ -808,7 +868,7 @@ app.post("/api/admin/review/projects/:id/reject", requireStaffReview, async (req
     res.json({ project });
   } catch (error) {
     console.error("Failed to reject review project:", error);
-    res.status(400).json({ error: error.message || "Failed to reject project." });
+    res.status(error.statusCode || 400).json({ error: error.message || "Failed to reject project." });
   }
 });
 
@@ -818,7 +878,7 @@ app.post("/api/admin/review/projects/:id/remove-from-queue", requireStaffReview,
     res.json({ project });
   } catch (error) {
     console.error("Failed to remove review project from queue:", error);
-    res.status(400).json({ error: error.message || "Failed to remove project from queue." });
+    res.status(error.statusCode || 400).json({ error: error.message || "Failed to remove project from queue." });
   }
 });
 
@@ -828,13 +888,13 @@ app.post("/api/admin/review/projects/:id/block", requireStaffReview, async (req,
     res.json({ project });
   } catch (error) {
     console.error("Failed to block review project:", error);
-    res.status(400).json({ error: error.message || "Failed to block project." });
+    res.status(error.statusCode || 400).json({ error: error.message || "Failed to block project." });
   }
 });
 
 app.patch("/api/admin/review/projects/:id", requireStaffReview, async (req, res) => {
   try {
-    const reviewProject = await patchAdminReviewProjectFlags(req.params.id, req.body);
+    const reviewProject = await patchAdminReviewProjectFlags(req.params.id, req.body, req.session.userId);
     res.json(reviewProject);
   } catch (error) {
     console.error("Failed to update review project:", error);

@@ -1,6 +1,6 @@
 import { apiFetch } from "../api/client.js";
 import { useAuth } from "../auth/AuthContext.jsx";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { JournalDescription } from "../components/JournalDescription.jsx";
 import { COINS_PER_APPROVED_HOUR } from "../constants/coinRates.js";
 import { readJsonResponse } from "../utils/fetchJson.js";
@@ -107,6 +107,15 @@ function reviewOutcomeLabel(outcome) {
   return "Review";
 }
 
+function reviewWorkflowEventLabel(event) {
+  if (event.type === "claim_acquired") return "Review claimed";
+  if (event.type === "claim_reassigned") return `Review reassigned${event.previousReviewerName ? ` from ${event.previousReviewerName}` : ""}`;
+  if (event.type === "claim_released") return "Review claim released";
+  if (event.type === "escalation_requested") return "Escalated to admins";
+  if (event.type === "escalation_resolved") return "Escalation resolved";
+  return "Workflow updated";
+}
+
 /** True when "new hours to approve" is above the logged/pending caps shown on the review page. */
 function approvalNeedsExceedAck(project, requestedNewHours) {
   if (!project || !Number.isFinite(requestedNewHours)) return false;
@@ -137,6 +146,7 @@ function AdminReviewIndex() {
   const { user } = useAuth();
   const [projects, setProjects] = useState([]);
   const [pendingProjects, setPendingProjects] = useState([]);
+  const [escalatedProjects, setEscalatedProjects] = useState([]);
   const [activeTab, setActiveTab] = useState("all");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("any");
@@ -159,6 +169,7 @@ function AdminReviewIndex() {
       if (!response.ok) throw new Error(data.error || "Failed to load review projects.");
       setProjects(data.projects || []);
       setPendingProjects(data.pendingProjects || []);
+      setEscalatedProjects(data.escalatedProjects || []);
       setStatus("");
     } catch (err) {
       setError(err.message);
@@ -166,7 +177,18 @@ function AdminReviewIndex() {
     }
   }
 
-  const shownProjects = activeTab === "pending" ? pendingProjects : projects;
+  const hiddenFromReviewer = (project) =>
+    !canFullAdmin(user?.role) && (
+      (project.reviewEscalatedAt && !project.reviewEscalationResolvedAt) ||
+      (project.claim && !project.claim.isMine && !project.claim.isStale)
+    );
+  const visiblePendingProjects = pendingProjects.filter((project) => !hiddenFromReviewer(project));
+  const visibleProjects = projects.filter((project) => !hiddenFromReviewer(project));
+  const shownProjects = activeTab === "pending"
+    ? visiblePendingProjects
+    : activeTab === "escalated"
+      ? escalatedProjects
+      : visibleProjects;
   const filteredProjects = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return shownProjects.filter((project) => {
@@ -204,8 +226,13 @@ function AdminReviewIndex() {
               All Projects ({projects.length})
             </button>
             <button className={activeTab === "pending" ? "active" : ""} type="button" onClick={() => setActiveTab("pending")}>
-              Pending Review ({pendingProjects.length})
+              Pending Review ({visiblePendingProjects.length})
             </button>
+            {canFullAdmin(user?.role) ? (
+              <button className={activeTab === "escalated" ? "active" : ""} type="button" onClick={() => setActiveTab("escalated")}>
+                Escalated ({escalatedProjects.length})
+              </button>
+            ) : null}
           </div>
           <label>
             Ship date
@@ -230,7 +257,15 @@ function AdminReviewIndex() {
         {status ? <p className="admin-review-state">{status}</p> : null}
         {error ? <p className="admin-review-state admin-review-state--error">{error}</p> : null}
         {!status && !error && filteredProjects.length === 0 ? (
-          <p className="admin-review-state">{activeTab === "pending" ? "All projects have been reviewed!" : "No projects yet."}</p>
+          <p className="admin-review-state">
+            {activeTab === "pending"
+              ? pendingProjects.length === 0
+                ? "All projects have been reviewed!"
+                : "No reviews are available in this queue."
+              : activeTab === "escalated"
+                ? "No escalated reviews."
+                : "No projects yet."}
+          </p>
         ) : null}
 
         <section className="admin-review-grid">
@@ -253,7 +288,9 @@ function AdminReviewIndex() {
                   {project.projectType ? <span>{project.projectType}</span> : null}
                   {project.shipped ? <span>Shipped</span> : null}
                   {project.reviewed ? <span>Reviewed</span> : null}
+                  {project.reviewEscalatedAt && !project.reviewEscalationResolvedAt ? <span className="admin-review-tag--escalated">Escalated</span> : null}
                   {project.fraudFlag ? <span className="admin-review-tag--fraud">Fraud flag</span> : null}
+                  {project.claim && !project.claim.isStale ? <span>Claimed by {project.claim.reviewerName}</span> : null}
                 </div>
                 <footer>
                   <div className="admin-review-user">
@@ -292,10 +329,51 @@ function AdminReviewDetail({ projectId }) {
   const [reductionBusy, setReductionBusy] = useState(false);
   const [coinsConflictModal, setCoinsConflictModal] = useState(null);
   const [rejectingOrderId, setRejectingOrderId] = useState(null);
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [escalationNote, setEscalationNote] = useState("");
+  const [escalationBusy, setEscalationBusy] = useState(false);
+  const heldReviewClaim = useRef(false);
 
   useEffect(() => {
     loadProject();
   }, [projectId]);
+
+  useEffect(() => {
+    heldReviewClaim.current = Boolean(project?.claim?.isMine);
+  }, [project?.claim?.isMine]);
+
+  useEffect(() => {
+    return () => {
+      if (heldReviewClaim.current) {
+        heldReviewClaim.current = false;
+        void apiFetch(`/api/admin/review/projects/${projectId}/claim`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+      }
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!project?.claim?.isMine || project.claim.isStale) return undefined;
+    const interval = window.setInterval(async () => {
+      try {
+        const response = await apiFetch(`/api/admin/review/projects/${project.id}/claim/heartbeat`, {
+          method: "POST",
+          credentials: "include",
+        });
+        const data = await readJsonResponse(response);
+        if (!response.ok || !data.claimed) {
+          heldReviewClaim.current = false;
+          setProject((current) => current ? { ...current, claim: current.claim ? { ...current.claim, isMine: false, isStale: true } : null } : current);
+          setMessage("Your review claim expired or was taken over. Claim it again before submitting a decision.");
+        }
+      } catch {
+        // A transient network error should not clear a claim that can still heartbeat again.
+      }
+    }, 30_000);
+    return () => window.clearInterval(interval);
+  }, [project?.id, project?.claim?.isMine, project?.claim?.isStale]);
 
   async function loadProject() {
     setStatus("Loading project...");
@@ -305,6 +383,7 @@ function AdminReviewDetail({ projectId }) {
       const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.error || "Failed to load project.");
       setProject(data.project);
+      heldReviewClaim.current = Boolean(data.project?.claim?.isMine);
       setJournalEntries(data.journalEntries || []);
       setApprovedHours("");
       setReducedApprovedHours("");
@@ -313,6 +392,85 @@ function AdminReviewDetail({ projectId }) {
     } catch (err) {
       setMessage(err.message);
       setStatus("");
+    }
+  }
+
+  async function acquireReviewClaim(takeover = false) {
+    if (!project) return;
+    if (takeover) {
+      const confirmed = window.confirm(
+        `Take over this review from ${project.claim?.reviewerName || "the current reviewer"}? They will lose the active claim.`
+      );
+      if (!confirmed) return;
+    }
+    setClaimBusy(true);
+    setMessage("");
+    try {
+      const endpoint = takeover
+        ? `/api/admin/review/projects/${project.id}/claim/takeover`
+        : `/api/admin/review/projects/${project.id}/claim`;
+      const response = await apiFetch(endpoint, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await readJsonResponse(response);
+      if (data.claim) setProject((current) => current ? { ...current, claim: data.claim } : current);
+      if (!response.ok || !data.claimed) {
+        throw new Error(data.error || `This review is currently claimed by ${data.claim?.reviewerName || "another reviewer"}.`);
+      }
+      heldReviewClaim.current = true;
+      setMessage("Review claimed. Your claim refreshes while this page is open.");
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setClaimBusy(false);
+    }
+  }
+
+  async function releaseReviewClaim() {
+    if (!project) return;
+    setClaimBusy(true);
+    try {
+      const response = await apiFetch(`/api/admin/review/projects/${project.id}/claim`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await readJsonResponse(response);
+      if (!response.ok) throw new Error(data.error || "Failed to release review claim.");
+      heldReviewClaim.current = false;
+      setProject((current) => current ? { ...current, claim: null } : current);
+      setMessage("Review claim released.");
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setClaimBusy(false);
+    }
+  }
+
+  async function escalateReview() {
+    if (!project || !escalationNote.trim()) {
+      setMessage("Add a reason before sending this review to admins.");
+      return;
+    }
+    setEscalationBusy(true);
+    setMessage("");
+    try {
+      const response = await apiFetch(`/api/admin/review/projects/${project.id}/escalate`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: escalationNote }),
+      });
+      const data = await readJsonResponse(response);
+      if (!response.ok) throw new Error(data.error || "Failed to escalate review.");
+      heldReviewClaim.current = false;
+      setEscalationNote("");
+      await loadProject();
+      setMessage("Sent to the admin escalation queue.");
+    } catch (err) {
+      setMessage(err.message);
+    } finally {
+      setEscalationBusy(false);
     }
   }
 
@@ -346,6 +504,11 @@ function AdminReviewDetail({ projectId }) {
   async function submitReview({ acknowledgeExceedLoggedHours = false } = {}) {
     if (!project) return;
     setMessage("");
+
+    if (!project.claim?.isMine || project.claim.isStale) {
+      setMessage("Claim this review before submitting a decision.");
+      return;
+    }
 
     if ((selectedAction === "reject" || selectedAction === "removeFromQueue") && !feedback.trim()) {
       setMessage(
@@ -596,6 +759,9 @@ function AdminReviewDetail({ projectId }) {
   }
 
   const isAlreadyReviewed = project.reviewed || project.status === "approved";
+  const isPendingReview = !isAlreadyReviewed && project.shipped && (project.status === "in-review" || project.status === "pending-reship");
+  const hasActiveClaim = Boolean(project.claim?.isMine && !project.claim.isStale);
+  const escalationPending = Boolean(project.reviewEscalatedAt && !project.reviewEscalationResolvedAt);
   const canReduceApprovedHours =
     Number(project.approvedHours ?? 0) > 0 && project.status !== "blocked" && !project.blocked;
   const joeUrl = slackJoeToolUrl(project.user?.slackId);
@@ -616,6 +782,11 @@ function AdminReviewDetail({ projectId }) {
     approvalDeductsHours(project, approvedHoursNumber);
   const loggedHoursPreview = combinedLoggedHours(project);
   const reviewHistory = getProjectReviewHistory(project);
+  const reviewEvents = Array.isArray(project.reviewEvents) ? project.reviewEvents : [];
+  const reviewTimeline = [
+    ...reviewHistory.map((record) => ({ ...record, timelineKind: "decision" })),
+    ...reviewEvents.map((event) => ({ ...event, timelineKind: "workflow" })),
+  ].sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
   const reducedApprovedHoursNumber = Number.parseFloat(reducedApprovedHours);
   const currentApprovedHours = Number(project.approvedHours ?? 0);
   const reductionPreviewHours =
@@ -678,6 +849,57 @@ function AdminReviewDetail({ projectId }) {
           </section>
         ) : null}
 
+        {isPendingReview ? (
+          <section className={`admin-review-panel admin-review-ownership${escalationPending ? " is-escalated" : ""}`} aria-label="Review ownership">
+            <h2>{escalationPending ? "Admin escalation" : "Review ownership"}</h2>
+            {escalationPending ? (
+              <p>This submission is waiting in the admin escalation queue. Reason: {project.reviewEscalationNote}</p>
+            ) : null}
+            {hasActiveClaim ? (
+              <div className="admin-review-claim-row">
+                <span>Claimed by you. Keep this page open while reviewing.</span>
+                <button className="admin-review-tool-btn" type="button" disabled={claimBusy} onClick={releaseReviewClaim}>
+                  Release claim
+                </button>
+              </div>
+            ) : project.claim && !project.claim.isStale ? (
+              <div className="admin-review-claim-row">
+                <span>Claimed by {project.claim.reviewerName}. Decisions are disabled while they review.</span>
+                {canFullAdmin(user?.role) ? (
+                  <button className="admin-review-tool-btn" type="button" disabled={claimBusy} onClick={() => acquireReviewClaim(true)}>
+                    {claimBusy ? "Taking over…" : "Take over review"}
+                  </button>
+                ) : null}
+              </div>
+            ) : escalationPending && !canFullAdmin(user?.role) ? (
+              <p>This review is reserved for an admin.</p>
+            ) : (
+              <div className="admin-review-claim-row">
+                <span>{project.claim?.isStale ? "The previous claim expired." : "No reviewer owns this submission yet."}</span>
+                <button className="admin-review-tool-btn" type="button" disabled={claimBusy} onClick={() => acquireReviewClaim()}>
+                  {claimBusy ? "Claiming…" : "Claim review"}
+                </button>
+              </div>
+            )}
+            {hasActiveClaim && !escalationPending ? (
+              <div className="admin-review-escalate-form">
+                <label>
+                  Escalation reason
+                  <textarea
+                    value={escalationNote}
+                    maxLength={2000}
+                    onChange={(event) => setEscalationNote(event.target.value)}
+                    placeholder="Explain what needs an admin decision."
+                  />
+                </label>
+                <button className="admin-review-tool-btn" type="button" disabled={escalationBusy || !escalationNote.trim()} onClick={escalateReview}>
+                  {escalationBusy ? "Sending…" : "Escalate to admins"}
+                </button>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
         <label className="admin-review-fraud">
           <input
             type="checkbox"
@@ -718,7 +940,7 @@ function AdminReviewDetail({ projectId }) {
                 step="0.25"
                 placeholder={newHoursPlaceholder}
                 value={approvedHours}
-                disabled={isAlreadyReviewed}
+                disabled={!hasActiveClaim || isAlreadyReviewed}
                 onChange={(event) => handleApprovedHoursChange(event.target.value)}
               />
               <small>Only this approved amount awards coins: {formatHours(awardPreview)} coins</small>
@@ -732,7 +954,7 @@ function AdminReviewDetail({ projectId }) {
                     <input
                       type="checkbox"
                       checked={exceedAcknowledged}
-                      disabled={isAlreadyReviewed}
+                      disabled={!hasActiveClaim || isAlreadyReviewed}
                       onChange={(event) => setExceedAcknowledged(event.target.checked)}
                     />
                     <span>I&apos;m aware that I&apos;m giving more hours than the logged ones</span>
@@ -759,19 +981,31 @@ function AdminReviewDetail({ projectId }) {
           </div>
           </section>
 
-          {reviewHistory.length > 0 ? (
+          {reviewTimeline.length > 0 ? (
             <section className="admin-review-panel admin-review-history" aria-label="Review history">
-              <h2>History ({reviewHistory.length})</h2>
+              <h2>History ({reviewTimeline.length})</h2>
               <div className="admin-review-history-list">
-                {reviewHistory.map((record) => (
+                {reviewTimeline.map((record) => record.timelineKind === "decision" ? (
                   <article className={`admin-review-history-item is-${record.outcome}`} key={record.id}>
                     <header className="admin-review-history-item-header">
                       <strong className={`admin-review-history-outcome is-${record.outcome}`}>
                         {reviewOutcomeLabel(record.outcome)}
                       </strong>
-                      <small className="admin-review-history-meta">{formatReviewRecordMeta(record)}</small>
+                      <small className="admin-review-history-meta">
+                        {record.reviewerName ? `${record.reviewerName} · ` : ""}{formatReviewRecordMeta(record)}
+                      </small>
                     </header>
                     {record.feedback ? <p className="admin-review-history-body">{record.feedback}</p> : null}
+                  </article>
+                ) : (
+                  <article className="admin-review-history-item is-workflow" key={`event-${record.id}`}>
+                    <header className="admin-review-history-item-header">
+                      <strong className="admin-review-history-outcome">{reviewWorkflowEventLabel(record)}</strong>
+                      <small className="admin-review-history-meta">
+                        {record.actorName} · {record.createdAt ? new Date(record.createdAt).toLocaleString() : "Time unknown"}
+                      </small>
+                    </header>
+                    {record.note ? <p className="admin-review-history-body">{record.note}</p> : null}
                   </article>
                 ))}
               </div>
@@ -866,15 +1100,16 @@ function AdminReviewDetail({ projectId }) {
                 re-ship.
               </p>
               <div className="admin-review-actions">
-                <button className={selectedAction === "approve" ? "approve active" : "approve"} type="button" onClick={() => setSelectedAction("approve")}>
+                <button className={selectedAction === "approve" ? "approve active" : "approve"} type="button" disabled={!hasActiveClaim} onClick={() => setSelectedAction("approve")}>
                   ✓ Approve
                 </button>
-                <button className={selectedAction === "reject" ? "reject active" : "reject"} type="button" onClick={() => setSelectedAction("reject")}>
+                <button className={selectedAction === "reject" ? "reject active" : "reject"} type="button" disabled={!hasActiveClaim} onClick={() => setSelectedAction("reject")}>
                   ✗ Reject
                 </button>
                 <button
                   className={selectedAction === "removeFromQueue" ? "remove-queue active" : "remove-queue"}
                   type="button"
+                  disabled={!hasActiveClaim}
                   onClick={() => setSelectedAction("removeFromQueue")}
                 >
                   ↩ Remove from queue
@@ -884,9 +1119,9 @@ function AdminReviewDetail({ projectId }) {
                 {deductsHoursPreview
                   ? "Deflation explanation (required because logged hours are being deducted)"
                   : "Comment (optional for approve; required for reject or remove from queue)"}
-                <textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} />
+                <textarea value={feedback} disabled={!hasActiveClaim} onChange={(event) => setFeedback(event.target.value)} />
               </label>
-              <button className="admin-review-submit" type="button" onClick={() => submitReview()}>
+              <button className="admin-review-submit" type="button" disabled={!hasActiveClaim} onClick={() => submitReview()}>
                 Submit Review
               </button>
             </>

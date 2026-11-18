@@ -221,6 +221,12 @@
   font-weight: 800;
 }
 
+.admin-review-tag--escalated {
+  background: rgba(255, 196, 96, 0.22) !important;
+  color: #ffe6b6 !important;
+  border-color: rgba(255, 196, 96, 0.55) !important;
+}
+
 .admin-review-card footer {
   display: flex;
   align-items: center;
@@ -378,6 +384,11 @@
   background: rgba(48, 36, 8, 0.22);
 }
 
+.admin-review-history-item.is-workflow {
+  border-color: rgba(113, 191, 255, 0.38);
+  background: rgba(15, 39, 57, 0.25);
+}
+
 .admin-review-history-item-header {
   display: flex;
   flex-direction: column;
@@ -425,6 +436,60 @@
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.admin-review-ownership {
+  margin: 1rem 0;
+  border-color: rgba(113, 191, 255, 0.55);
+  background: rgba(17, 43, 61, 0.62);
+}
+
+.admin-review-ownership.is-escalated {
+  border-color: rgba(255, 196, 96, 0.62);
+  background: rgba(57, 42, 16, 0.72);
+}
+
+.admin-review-claim-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0.65rem 0;
+}
+
+.admin-review-escalate-form {
+  display: flex;
+  align-items: end;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(245, 230, 200, 0.18);
+}
+
+.admin-review-escalate-form label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+
+.admin-review-escalate-form textarea {
+  min-height: 4.5rem;
+  padding: 0.65rem 0.75rem;
+  border: 2px solid #8b6239;
+  border-radius: 10px;
+  background: rgba(45, 30, 16, 0.7);
+  color: #f5e6c8;
+  font: inherit;
+  resize: vertical;
+}
+
+.admin-review-ownership button:disabled,
+.admin-review-actions button:disabled,
+.admin-review-submit:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
 }
 
 .admin-review-reship-update {
@@ -527,6 +592,16 @@
 }
 
 @media (max-width: 760px) {
+  .admin-review-claim-row,
+  .admin-review-escalate-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-review-ownership button {
+    align-self: flex-start;
+  }
+
   .admin-review-reduce-hours-grid {
     grid-template-columns: 1fr;
   }
