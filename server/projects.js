@@ -1263,6 +1263,10 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
       `SELECT airtable_record_id FROM ysws_project_submissions WHERE project_id = $1`,
       [project.id]
     );
+    const journalEntriesResult = await client.query(
+      `SELECT * FROM journal_entries WHERE project_id = $1 ORDER BY created_at ASC, id ASC`,
+      [project.id]
+    );
     const coinClawback = Math.max(0, Number(project.coins_earned ?? 0));
     const balanceBefore = Number(userResult.rows[0].coins ?? 0);
     const userBalanceResult = await client.query(
@@ -1270,7 +1274,10 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
       [coinClawback, project.user_id]
     );
     const balanceAfter = Number(userBalanceResult.rows[0].coins ?? 0);
-    const coinShortfall = Math.max(0, coinClawback - balanceBefore);
+    const coinShortfall = Math.max(0, coinClawback - Math.max(0, balanceBefore));
+    const projectAuditSnapshot = Object.fromEntries(
+      Object.entries(project).filter(([key]) => key !== "user_email" && key !== "user_slack_id")
+    );
     const cleanupSnapshot = {
       project,
       projectRecordExpected: Boolean(project.airtable_record_id || hasAirtableProjectsConfig),
@@ -1281,10 +1288,10 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
       `
         INSERT INTO project_deletion_records (
           project_id, project_owner_id, project_name, deleted_by_user_id, deletion_reason,
-          project_snapshot, cleanup_snapshot, coin_clawback, coin_balance_before,
+          project_snapshot, journal_entries_snapshot, cleanup_snapshot, coin_clawback, coin_balance_before,
           coin_balance_after, coin_shortfall
         )
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11, $12)
         RETURNING id
       `,
       [
@@ -1293,7 +1300,8 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
         project.name,
         deletedByUserId ?? null,
         deletionReason,
-        JSON.stringify(project),
+        JSON.stringify(projectAuditSnapshot),
+        JSON.stringify(journalEntriesResult.rows),
         JSON.stringify(cleanupSnapshot),
         coinClawback,
         balanceBefore,

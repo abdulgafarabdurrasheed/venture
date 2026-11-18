@@ -83,6 +83,7 @@ import {
   listAdminUsers,
 } from "./users.js";
 import { getUserDashboard } from "./userDashboard.js";
+import { getProjectDeletionRecord, listProjectDeletionRecords } from "./projectDeletions.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -905,6 +906,33 @@ app.delete("/api/admin/review/projects/:id", requireSuperAdmin, async (req, res)
   } catch (error) {
     console.error("Failed to delete review project:", error);
     res.status(500).json({ error: "Failed to delete project." });
+  }
+});
+
+app.get("/api/admin/project-deletions", requireSuperAdmin, async (req, res) => {
+  try {
+    const records = await listProjectDeletionRecords({
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+    res.json({ records });
+  } catch (error) {
+    console.error("Failed to load project deletion records:", error);
+    res.status(500).json({ error: "Failed to load project deletion records." });
+  }
+});
+
+app.get("/api/admin/project-deletions/:id", requireSuperAdmin, async (req, res) => {
+  try {
+    const record = await getProjectDeletionRecord(req.params.id);
+    if (!record) {
+      res.status(404).json({ error: "Project deletion record not found." });
+      return;
+    }
+    res.json({ record });
+  } catch (error) {
+    console.error("Failed to load project deletion snapshot:", error);
+    res.status(500).json({ error: "Failed to load project deletion snapshot." });
   }
 });
 

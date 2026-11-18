@@ -17,6 +17,7 @@ export async function ensureProjectDeletionRecordsTable() {
       deleted_by_user_id INTEGER,
       deletion_reason TEXT NOT NULL,
       project_snapshot JSONB NOT NULL,
+      journal_entries_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
       cleanup_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
       coin_clawback NUMERIC(10, 2) NOT NULL DEFAULT 0,
       coin_balance_before NUMERIC(10, 2) NOT NULL DEFAULT 0,
@@ -29,6 +30,10 @@ export async function ensureProjectDeletionRecordsTable() {
     )
   `);
   await pool.query(`
+    ALTER TABLE project_deletion_records
+    ADD COLUMN IF NOT EXISTS journal_entries_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb
+  `);
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_project_deletion_records_cleanup
     ON project_deletion_records(created_at)
     WHERE external_cleanup_completed_at IS NULL
@@ -37,6 +42,65 @@ export async function ensureProjectDeletionRecordsTable() {
     CREATE INDEX IF NOT EXISTS idx_project_deletion_records_project
     ON project_deletion_records(project_id, created_at DESC)
   `);
+}
+
+export async function listProjectDeletionRecords({ limit = 100, offset = 0 } = {}) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+
+  const safeLimit = Math.max(1, Math.min(500, Math.trunc(Number(limit) || 100)));
+  const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
+  const result = await pool.query(
+    `
+      SELECT
+        id, project_id, project_owner_id, project_name, deleted_by_user_id, deletion_reason,
+        project_snapshot, jsonb_array_length(journal_entries_snapshot) AS journal_entry_count,
+        coin_clawback, coin_balance_before, coin_balance_after, coin_shortfall,
+        external_cleanup_completed_at, external_cleanup_attempts, external_cleanup_last_error, created_at
+      FROM project_deletion_records
+      ORDER BY created_at DESC, id DESC
+      LIMIT $1 OFFSET $2
+    `,
+    [safeLimit, safeOffset]
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    projectId: row.project_id,
+    projectOwnerId: row.project_owner_id,
+    projectName: row.project_name,
+    deletedByUserId: row.deleted_by_user_id,
+    reason: row.deletion_reason,
+    project: row.project_snapshot,
+    archivedJournalCount: Number(row.journal_entry_count ?? 0),
+    coinClawback: Number(row.coin_clawback ?? 0),
+    coinBalanceBefore: Number(row.coin_balance_before ?? 0),
+    coinBalanceAfter: Number(row.coin_balance_after ?? 0),
+    coinShortfall: Number(row.coin_shortfall ?? 0),
+    externalCleanupCompletedAt: row.external_cleanup_completed_at,
+    externalCleanupAttempts: Number(row.external_cleanup_attempts ?? 0),
+    externalCleanupLastError: row.external_cleanup_last_error,
+    deletedAt: row.created_at,
+  }));
+}
+
+export async function getProjectDeletionRecord(id) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+
+  const result = await pool.query(
+    `
+      SELECT project_snapshot, journal_entries_snapshot
+      FROM project_deletion_records
+      WHERE id = $1
+    `,
+    [id]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+
+  return {
+    project: row.project_snapshot,
+    journalEntries: Array.isArray(row.journal_entries_snapshot) ? row.journal_entries_snapshot : [],
+  };
 }
 
 export async function processPendingProjectDeletions({ limit = 25, deletionId = null } = {}) {
