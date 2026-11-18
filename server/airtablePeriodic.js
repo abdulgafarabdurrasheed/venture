@@ -1,5 +1,6 @@
 import { pool } from "./db.js";
 import { STACK_LAUNCH_UTC } from "./hackatimeAuth.js";
+import { hasAirtableJournalsConfig } from "./airtableJournals.js";
 
 const STACK_LAUNCH_TIMESTAMPTZ = STACK_LAUNCH_UTC.toISOString();
 import { hasAirtableProjectsConfig, syncProjectToAirtable, persistProjectAirtableRecordId } from "./airtableProjects.js";
@@ -10,6 +11,7 @@ import {
   syncAllShopOrdersToAirtable,
 } from "./airtableOrders.js";
 import { getYswsAirtableConfigStatus, hasAirtableYswsConfig, syncAllYswsSubmissions } from "./airtableYsws.js";
+import { processPendingProjectDeletions } from "./projectDeletions.js";
 
 const syncIntervalMs = Number(process.env.AIRTABLE_SYNC_INTERVAL_MS || 5 * 60 * 1000);
 
@@ -24,6 +26,7 @@ export function getPeriodicAirtableSyncStatus() {
     lastSync: lastPeriodicSync,
     usersConfigured: hasAirtableUsersConfig,
     projectsConfigured: hasAirtableProjectsConfig,
+    journalsConfigured: hasAirtableJournalsConfig,
     yswsConfigured: hasAirtableYswsConfig,
     ysws: getYswsAirtableConfigStatus(),
     ordersConfigured: hasAirtableOrdersConfig,
@@ -36,7 +39,13 @@ export async function syncAllUsersAndProjectsToAirtable() {
     return { ok: false, reason: "DATABASE_URL is not set." };
   }
 
-  if (!hasAirtableUsersConfig && !hasAirtableProjectsConfig && !hasAirtableYswsConfig && !hasAirtableOrdersConfig) {
+  if (
+    !hasAirtableUsersConfig &&
+    !hasAirtableProjectsConfig &&
+    !hasAirtableJournalsConfig &&
+    !hasAirtableYswsConfig &&
+    !hasAirtableOrdersConfig
+  ) {
     return { ok: false, reason: "Airtable not configured." };
   }
 
@@ -53,9 +62,15 @@ export async function syncAllUsersAndProjectsToAirtable() {
     projects: { synced: 0, failed: 0, skipped: 0 },
     ysws: { synced: 0, failed: 0, skippedProjects: 0, total: 0 },
     orders: { synced: 0, failed: 0, total: 0 },
+    projectDeletions: { completed: 0, failed: 0, pending: 0 },
   };
 
   try {
+    result.projectDeletions = await processPendingProjectDeletions();
+    if (result.projectDeletions.failed > 0) {
+      result.ok = false;
+    }
+
     if (hasAirtableUsersConfig) {
       const usersResult = await pool.query(`
         SELECT

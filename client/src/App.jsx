@@ -7,6 +7,7 @@ import { RsvpPage } from "./components/RsvpPage.jsx";
 import { PlatformGate } from "./platform/PlatformGate.jsx";
 import { AdminAirtableSyncPage } from "./pages/AdminAirtableSyncPage.jsx";
 import { AdminPage } from "./pages/AdminPage.jsx";
+import { AdminProjectDeletionsPage } from "./pages/AdminProjectDeletionsPage.jsx";
 import { AdminReviewPage } from "./pages/AdminReviewPage.jsx";
 import { AdminShopOrdersPage } from "./pages/AdminShopOrdersPage.jsx";
 import { AdminShopPage } from "./pages/AdminShopPage.jsx";
@@ -203,6 +204,9 @@ export default function App() {
       break;
     case "/admin/stats":
       page = <AdminStatsPage />;
+      break;
+    case "/admin/project-deletions":
+      page = <AdminProjectDeletionsPage />;
       break;
     case "/admin/users":
       page = <AdminUsersPage />;

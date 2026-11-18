@@ -13,6 +13,7 @@ const adminLinks = [
 
 const superAdminLinks = [
   { href: "/admin/airtable_sync", icon: "🔄", title: "Airtable Sync", desc: "Sync status, logs, and diagnostics" },
+  { href: "/admin/project-deletions", icon: "🗃️", title: "Deleted Projects", desc: "Deletion reasons, coin clawbacks, and Airtable cleanup history" },
 ];
 
 export function AdminPage() {

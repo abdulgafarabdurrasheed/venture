@@ -112,34 +112,136 @@ export async function ensureUsersTable() {
     CREATE INDEX IF NOT EXISTS idx_users_email ON users (email)
   `);
 
-  // Older deployments may have been created before hackclub_sub uniqueness was enforced.
-  // Remove duplicates (keep oldest row) so upsert with ON CONFLICT works reliably.
-  const dedupeResult = await pool.query(`
-    WITH ranked AS (
+}
+
+/**
+ * Older deployments may contain multiple user rows for one Hack Club account.
+ * Reassign every foreign-key reference and combine wallet totals before removing
+ * duplicate rows, so PostgreSQL's ON DELETE CASCADE cannot erase participant data.
+ */
+export async function mergeDuplicateUsersByHackclubSub() {
+  if (!pool) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Keep logins and other writes from adding a duplicate between the merge and index creation.
+    await client.query("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE");
+
+    const foreignKeyColumns = await client.query(`
       SELECT
-        id,
-        ROW_NUMBER() OVER (PARTITION BY hackclub_sub ORDER BY id ASC) AS row_num
-      FROM users
-      WHERE hackclub_sub IS NOT NULL
-    ),
-    deleted AS (
-      DELETE FROM users u
-      USING ranked r
-      WHERE u.id = r.id
-        AND r.row_num > 1
-      RETURNING u.id
-    )
-    SELECT COUNT(*)::int AS deleted_count FROM deleted
-  `);
+        table_ns.nspname AS schema_name,
+        table_class.relname AS table_name,
+        column_attribute.attname AS column_name
+      FROM pg_constraint constraint_row
+      JOIN pg_class table_class ON table_class.oid = constraint_row.conrelid
+      JOIN pg_namespace table_ns ON table_ns.oid = table_class.relnamespace
+      JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY AS source_key(attnum, position) ON TRUE
+      JOIN LATERAL unnest(constraint_row.confkey) WITH ORDINALITY AS target_key(attnum, position)
+        ON target_key.position = source_key.position
+      JOIN pg_attribute column_attribute
+        ON column_attribute.attrelid = table_class.oid
+       AND column_attribute.attnum = source_key.attnum
+      JOIN pg_attribute target_attribute
+        ON target_attribute.attrelid = constraint_row.confrelid
+       AND target_attribute.attnum = target_key.attnum
+      WHERE constraint_row.contype = 'f'
+        AND constraint_row.confrelid = 'users'::regclass
+        AND target_attribute.attname = 'id'
+      ORDER BY table_ns.nspname, table_class.relname, column_attribute.attname
+    `);
 
-  const deletedCount = dedupeResult.rows?.[0]?.deleted_count ?? 0;
-  if (deletedCount > 0) {
-    console.warn(`[users] Removed ${deletedCount} duplicate user rows by hackclub_sub.`);
+    const duplicateRows = await client.query(`
+      SELECT duplicate_user.id AS duplicate_id, canonical.id AS canonical_id
+      FROM users duplicate_user
+      JOIN LATERAL (
+        SELECT id
+        FROM users candidate
+        WHERE candidate.hackclub_sub = duplicate_user.hackclub_sub
+        ORDER BY candidate.id ASC
+        LIMIT 1
+      ) canonical ON canonical.id <> duplicate_user.id
+      WHERE duplicate_user.hackclub_sub IS NOT NULL
+      ORDER BY duplicate_user.id ASC
+      FOR UPDATE OF duplicate_user
+    `);
+
+    let mergedCount = 0;
+    for (const { duplicate_id: duplicateId, canonical_id: canonicalId } of duplicateRows.rows) {
+      await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [canonicalId]);
+
+      await client.query(
+        `UPDATE users AS canonical
+         SET email = COALESCE(canonical.email, duplicate_user.email),
+             name = COALESCE(canonical.name, duplicate_user.name),
+             slug = COALESCE(canonical.slug, duplicate_user.slug),
+             profile_image_url = COALESCE(canonical.profile_image_url, duplicate_user.profile_image_url),
+             slack_id = COALESCE(canonical.slack_id, duplicate_user.slack_id),
+             verification_status = COALESCE(canonical.verification_status, duplicate_user.verification_status),
+             coins = COALESCE(canonical.coins, 0) + COALESCE(duplicate_user.coins, 0),
+             total_stars = COALESCE(canonical.total_stars, 0) + COALESCE(duplicate_user.total_stars, 0),
+             access_token = COALESCE(canonical.access_token, duplicate_user.access_token),
+             refresh_token = COALESCE(canonical.refresh_token, duplicate_user.refresh_token),
+             token_type = COALESCE(canonical.token_type, duplicate_user.token_type),
+             token_expires_at = COALESCE(canonical.token_expires_at, duplicate_user.token_expires_at),
+             expires_in_seconds = COALESCE(canonical.expires_in_seconds, duplicate_user.expires_in_seconds),
+             scope = COALESCE(canonical.scope, duplicate_user.scope),
+             raw_profile = COALESCE(canonical.raw_profile, duplicate_user.raw_profile),
+             raw_token = COALESCE(canonical.raw_token, duplicate_user.raw_token),
+             hackatime_access_token = COALESCE(canonical.hackatime_access_token, duplicate_user.hackatime_access_token),
+             hackatime_refresh_token = COALESCE(canonical.hackatime_refresh_token, duplicate_user.hackatime_refresh_token),
+             hackatime_token_expires_at = COALESCE(canonical.hackatime_token_expires_at, duplicate_user.hackatime_token_expires_at),
+             hackatime_connected_at = COALESCE(canonical.hackatime_connected_at, duplicate_user.hackatime_connected_at),
+             hackatime_total_hours = GREATEST(COALESCE(canonical.hackatime_total_hours, 0), COALESCE(duplicate_user.hackatime_total_hours, 0)),
+             hackatime_user_id = COALESCE(canonical.hackatime_user_id, duplicate_user.hackatime_user_id),
+             hackatime_github_username = COALESCE(canonical.hackatime_github_username, duplicate_user.hackatime_github_username),
+             updated_at = GREATEST(canonical.updated_at, duplicate_user.updated_at, NOW())
+         FROM users AS duplicate_user
+         WHERE canonical.id = $1 AND duplicate_user.id = $2`,
+        [canonicalId, duplicateId]
+      );
+
+      for (const { schema_name: schemaName, table_name: tableName, column_name: columnName } of foreignKeyColumns.rows) {
+        const quoteIdentifier = (value) => `"${value.replaceAll('"', '""')}"`;
+        await client.query(
+          `UPDATE ${quoteIdentifier(schemaName)}.${quoteIdentifier(tableName)}
+           SET ${quoteIdentifier(columnName)} = $1
+           WHERE ${quoteIdentifier(columnName)} = $2`,
+          [canonicalId, duplicateId]
+        );
+      }
+
+      await client.query(
+        `UPDATE project_deletion_records
+         SET project_owner_id = $1
+         WHERE project_owner_id = $2`,
+        [canonicalId, duplicateId]
+      );
+      await client.query(
+        `UPDATE project_deletion_records
+         SET deleted_by_user_id = $1
+         WHERE deleted_by_user_id = $2`,
+        [canonicalId, duplicateId]
+      );
+
+      await client.query("DELETE FROM users WHERE id = $1", [duplicateId]);
+      mergedCount += 1;
+    }
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_hackclub_sub_unique ON users (hackclub_sub)
+    `);
+    await client.query("COMMIT");
+
+    if (mergedCount > 0) {
+      console.warn(`[users] Merged ${mergedCount} duplicate user row(s) by hackclub_sub while preserving linked records.`);
+    }
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
-
-  await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_hackclub_sub_unique ON users (hackclub_sub)
-  `);
 }
 
 export function resolveRole(email) {

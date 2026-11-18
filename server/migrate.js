@@ -5,10 +5,11 @@ import { getPublicTables, hasDatabaseConfig, pool } from "./db.js";
 import { ensureAuditLogTable } from "./adminStats.js";
 import { ensureProjectsTable } from "./projects.js";
 import { ensureShopItemsTable } from "./shopItems.js";
-import { ensureUsersTable } from "./users.js";
+import { ensureUsersTable, mergeDuplicateUsersByHackclubSub } from "./users.js";
 import { isProduction } from "./security.js";
 import { migrateBrickColumnsToCoins } from "./coinSchema.js";
 import { ensureNotificationsTable } from "./notifications.js";
+import { ensureProjectDeletionRecordsTable } from "./projectDeletions.js";
 
 /** Tables created by ensure*Table on boot — used for post-migrate verification. */
 export const EXPECTED_TABLES = [
@@ -16,6 +17,7 @@ export const EXPECTED_TABLES = [
   "projects",
   "journal_entries",
   "project_review_feedback",
+  "project_deletion_records",
   "ysws_project_submissions",
   "shop_items",
   "shop_orders",
@@ -37,9 +39,11 @@ export async function ensureDatabaseSchema() {
   await migrateBrickColumnsToCoins();
   await ensureUsersTable();
   await ensureProjectsTable();
+  await ensureProjectDeletionRecordsTable();
   await ensureShopItemsTable();
   await ensureAuditLogTable();
   await ensureNotificationsTable();
+  await mergeDuplicateUsersByHackclubSub();
 }
 
 export async function verifyDatabaseSchema() {

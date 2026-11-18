@@ -596,8 +596,16 @@ function AdminReviewDetail({ projectId }) {
 
   async function deleteProjectPermanently() {
     if (!project) return;
+    const reason = window.prompt("Required audit reason for permanently deleting this project:");
+    if (reason === null) return;
+    if (!reason.trim()) {
+      setMessage("A reason is required to delete a project.");
+      return;
+    }
+
+    const coinClawback = Number(project.coinsEarned ?? 0);
     const ok = window.confirm(
-      "Permanently delete this project and all of its journal entries from the database? This cannot be undone."
+      `Permanently delete this project and its journal entries? The full ${coinClawback} coins earned by this project will be clawed back. If the owner has already spent some, their balance will go negative and future coin earnings will pay it back. External Airtable cleanup will retry if it fails. This action cannot be undone.\n\nReason: ${reason.trim()}`
     );
     if (!ok) return;
     setDeleteBusy(true);
@@ -606,6 +614,7 @@ function AdminReviewDetail({ projectId }) {
       const response = await apiFetch(`/api/admin/review/projects/${project.id}`, {
         method: "DELETE",
         credentials: "include",
+        body: JSON.stringify({ reason: reason.trim() }),
       });
       const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.error || "Failed to delete project.");

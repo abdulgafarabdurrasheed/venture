@@ -1,0 +1,30 @@
+.admin-project-deletions-archive {
+  padding: 1rem;
+  border: 2px solid rgba(247, 207, 87, 0.3);
+  border-radius: 10px;
+  background: rgba(35, 22, 12, 0.35);
+  white-space: normal;
+}
+
+.admin-project-deletions-archive h3,
+.admin-project-deletions-archive h4 {
+  margin: 0 0 0.6rem;
+  color: #f7cf57;
+}
+
+.admin-project-deletions-archive__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.6rem 0 1rem;
+}
+
+.admin-project-deletions-archive__journal {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(245, 230, 200, 0.2);
+}
+
+.admin-project-deletions-archive__journal p {
+  margin-bottom: 0;
+}

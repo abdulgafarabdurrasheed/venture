@@ -1,9 +1,18 @@
 import { insertNotification } from "./notifications.js";
 import { isShippingClosed } from "./shipDeadlines.js";
 import { pool } from "./db.js";
-import { deleteProjectFromAirtable, persistProjectAirtableRecordId, syncProjectToAirtable } from "./airtableProjects.js";
+import {
+  hasAirtableProjectsConfig,
+  persistProjectAirtableRecordId,
+  syncProjectToAirtable,
+} from "./airtableProjects.js";
 import { syncJournalEntryToAirtable } from "./airtableJournals.js";
-import { deleteProjectSubmissionsFromYsws, ensureYswsProjectSubmissionsTable, submitProjectToYsws, syncApprovedYswsSubmissionForProject } from "./airtableYsws.js";
+import {
+  ensureYswsProjectSubmissionsTable,
+  submitProjectToYsws,
+  syncApprovedYswsSubmissionForProject,
+} from "./airtableYsws.js";
+import { processPendingProjectDeletions } from "./projectDeletions.js";
 import { buildDefaultJustificationTemplate } from "./hourJustification.js";
 import { listPendingShopOrdersForUser, rejectShopOrderWithRefund, toReviewParticipantShopOrder } from "./shopItems.js";
 import { isHackClubCdnUrl, safeHackClubCdnUrl, assertJournalDescriptionMediaIsCdnOnly } from "./cdnLinks.js";
@@ -1217,29 +1226,154 @@ export async function patchAdminReviewProjectFlags(projectId, input = {}) {
   return getAdminReviewProject(projectId);
 }
 
-export async function deleteProjectBySuperadmin(projectId) {
+export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reason) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
-  const row = await getProjectRowForAirtableSync(projectId);
-  if (!row) return false;
+  const deletionReason = String(reason ?? "").trim();
+  if (!deletionReason) throw new Error("A reason is required to delete a project.");
 
-  await deleteProjectFromAirtable(row);
-  await deleteProjectSubmissionsFromYsws(projectId);
+  const client = await pool.connect();
+  let deletionId = null;
+  let deleted = false;
+  try {
+    await client.query("BEGIN");
+
+    const projectResult = await client.query(
+      `
+        SELECT projects.*, users.email AS user_email, users.slack_id AS user_slack_id
+        FROM projects
+        JOIN users ON users.id = projects.user_id
+        WHERE projects.id = $1
+        FOR UPDATE OF projects
+      `,
+      [projectId]
+    );
+    const project = projectResult.rows[0];
+    if (!project) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+
+    const userResult = await client.query("SELECT coins FROM users WHERE id = $1 FOR UPDATE", [project.user_id]);
+    if (!userResult.rows[0]) {
+      throw new Error("Project owner not found.");
+    }
+
+    const submissionsResult = await client.query(
+      `SELECT airtable_record_id FROM ysws_project_submissions WHERE project_id = $1`,
+      [project.id]
+    );
+    const journalEntriesResult = await client.query(
+      `SELECT * FROM journal_entries WHERE project_id = $1 ORDER BY created_at ASC, id ASC`,
+      [project.id]
+    );
+    const coinClawback = Math.max(0, Number(project.coins_earned ?? 0));
+    const balanceBefore = Number(userResult.rows[0].coins ?? 0);
+    const userBalanceResult = await client.query(
+      `UPDATE users SET coins = coins - $1, updated_at = NOW() WHERE id = $2 RETURNING coins`,
+      [coinClawback, project.user_id]
+    );
+    const balanceAfter = Number(userBalanceResult.rows[0].coins ?? 0);
+    const coinShortfall = Math.max(0, coinClawback - Math.max(0, balanceBefore));
+    const projectAuditSnapshot = Object.fromEntries(
+      Object.entries(project).filter(([key]) => key !== "user_email" && key !== "user_slack_id")
+    );
+    const projectRecordExpected = Boolean(project.airtable_record_id || hasAirtableProjectsConfig);
+    const cleanupSnapshot = {
+      project: projectRecordExpected
+        ? {
+            id: project.id,
+            name: project.name,
+            user_email: project.user_email,
+            airtable_record_id: project.airtable_record_id,
+          }
+        : null,
+      projectRecordExpected,
+      submissionRecordIds: submissionsResult.rows.map((submission) => submission.airtable_record_id).filter(Boolean),
+      journalEntryIds: journalEntriesResult.rows.map((entry) => entry.id),
+    };
+
+    const deletionRecordResult = await client.query(
+      `
+        INSERT INTO project_deletion_records (
+          project_id, project_owner_id, project_name, deleted_by_user_id, deletion_reason,
+          project_snapshot, journal_entries_snapshot, cleanup_snapshot, coin_clawback, coin_balance_before,
+          coin_balance_after, coin_shortfall
+        )
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11, $12)
+        RETURNING id
+      `,
+      [
+        project.id,
+        project.user_id,
+        project.name,
+        deletedByUserId ?? null,
+        deletionReason,
+        JSON.stringify(projectAuditSnapshot),
+        JSON.stringify(journalEntriesResult.rows),
+        JSON.stringify(cleanupSnapshot),
+        coinClawback,
+        balanceBefore,
+        balanceAfter,
+        coinShortfall,
+      ]
+    );
+    deletionId = deletionRecordResult.rows[0].id;
+
+    const result = await client.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+    if (result.rowCount !== 1) {
+      throw new Error("Project changed while it was being deleted.");
+    }
+    await client.query("COMMIT");
+    deleted = true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  if (deleted && deletionId) {
+    try {
+      await processPendingProjectDeletions({ deletionId });
+    } catch (error) {
+      console.error("[project-deletions] immediate cleanup attempt failed:", error);
+    }
+  }
+
+  return deleted;
+}
+
+export async function deleteProjectForUser(userId, projectId) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    
-    // Claw back any coins earned by this project before deleting it
-    if (row.coins_earned && Number(row.coins_earned) > 0) {
-      await client.query(
-        "UPDATE users SET coins = GREATEST(0, coins - $1), updated_at = NOW() WHERE id = $2",
-        [row.coins_earned, row.user_id]
-      );
+    const checkResult = await client.query(
+      `SELECT shipped, status, coins_earned, approved_hours, past_approved_hours
+       FROM projects
+       WHERE id = $1 AND user_id = $2
+       FOR UPDATE`,
+      [projectId, userId]
+    );
+    const project = checkResult.rows[0];
+
+    if (!project) {
+      await client.query("COMMIT");
+      return false;
     }
-    
-    const result = await client.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
-    
+    if (project.shipped) throw new Error("Cannot delete a project that has been shipped.");
+    if (
+      project.status === "approved" ||
+      Number(project.coins_earned ?? 0) > 0 ||
+      Number(project.approved_hours ?? 0) > 0 ||
+      Number(project.past_approved_hours ?? 0) > 0
+    ) {
+      throw new Error("Projects with prior approvals or earned coins cannot be deleted.");
+    }
+
+    const result = await client.query("DELETE FROM projects WHERE id = $1 AND user_id = $2", [projectId, userId]);
     await client.query("COMMIT");
     return result.rowCount > 0;
   } catch (error) {
@@ -1248,19 +1382,6 @@ export async function deleteProjectBySuperadmin(projectId) {
   } finally {
     client.release();
   }
-}
-
-export async function deleteProjectForUser(userId, projectId) {
-  if (!pool) throw new Error("DATABASE_URL is not set.");
-
-  const checkResult = await pool.query("SELECT shipped FROM projects WHERE id = $1 AND user_id = $2", [projectId, userId]);
-  const project = checkResult.rows[0];
-
-  if (!project) return false;
-  if (project.shipped) throw new Error("Cannot delete a project that has been shipped.");
-
-  const result = await pool.query("DELETE FROM projects WHERE id = $1 AND user_id = $2", [projectId, userId]);
-  return result.rowCount > 0;
 }
 
 export async function listJournalEntriesForUserProject(userId, projectId) {
