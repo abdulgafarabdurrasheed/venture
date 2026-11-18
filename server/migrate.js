@@ -5,7 +5,7 @@ import { getPublicTables, hasDatabaseConfig, pool } from "./db.js";
 import { ensureAuditLogTable } from "./adminStats.js";
 import { ensureProjectsTable } from "./projects.js";
 import { ensureShopItemsTable } from "./shopItems.js";
-import { ensureUsersTable } from "./users.js";
+import { ensureUsersTable, mergeDuplicateUsersByHackclubSub } from "./users.js";
 import { isProduction } from "./security.js";
 import { migrateBrickColumnsToCoins } from "./coinSchema.js";
 import { ensureNotificationsTable } from "./notifications.js";
@@ -43,6 +43,7 @@ export async function ensureDatabaseSchema() {
   await ensureShopItemsTable();
   await ensureAuditLogTable();
   await ensureNotificationsTable();
+  await mergeDuplicateUsersByHackclubSub();
 }
 
 export async function verifyDatabaseSchema() {
