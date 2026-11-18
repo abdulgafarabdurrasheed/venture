@@ -452,7 +452,9 @@ app.patch("/api/projects/:id", requireUser, async (req, res) => {
     res.json({ project });
   } catch (error) {
     console.error("Failed to update project:", error);
-    res.status(500).json({ error: error.message || "Failed to update project." });
+    res.status(error.name === "ProjectInReviewError" ? 409 : 500).json({
+      error: error.message || "Failed to update project.",
+    });
   }
 });
 
@@ -714,7 +716,13 @@ app.post("/api/projects/:id/journal_entries", requireUser, async (req, res) => {
     res.status(201).json(result);
   } catch (error) {
     console.error("Failed to create journal entry:", error);
-    res.status(500).json({ error: error.message || "Failed to create journal entry." });
+    const status =
+      error.name === "ProjectInReviewError"
+        ? 409
+        : error.message === "Project not found."
+          ? 404
+          : 500;
+    res.status(status).json({ error: error.message || "Failed to create journal entry." });
   }
 });
 
@@ -730,7 +738,11 @@ app.patch("/api/projects/:id/journal_entries/:entryId", requireUser, async (req,
   } catch (error) {
     const message = error.message || "Failed to update journal entry.";
     const status =
-      message === "Project not found." || message === "Journal entry not found." ? 404 : 400;
+      error.name === "ProjectInReviewError"
+        ? 409
+        : message === "Project not found." || message === "Journal entry not found."
+          ? 404
+          : 400;
     console.error("Failed to update journal entry:", error);
     res.status(status).json({ error: message });
   }
