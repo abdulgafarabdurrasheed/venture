@@ -1,9 +1,18 @@
 import { insertNotification } from "./notifications.js";
 import { isShippingClosed } from "./shipDeadlines.js";
 import { pool } from "./db.js";
-import { persistProjectAirtableRecordId, syncProjectToAirtable } from "./airtableProjects.js";
+import {
+  hasAirtableProjectsConfig,
+  persistProjectAirtableRecordId,
+  syncProjectToAirtable,
+} from "./airtableProjects.js";
 import { syncJournalEntryToAirtable } from "./airtableJournals.js";
-import { ensureYswsProjectSubmissionsTable, submitProjectToYsws, syncApprovedYswsSubmissionForProject } from "./airtableYsws.js";
+import {
+  ensureYswsProjectSubmissionsTable,
+  submitProjectToYsws,
+  syncApprovedYswsSubmissionForProject,
+} from "./airtableYsws.js";
+import { processPendingProjectDeletions } from "./projectDeletions.js";
 import { buildDefaultJustificationTemplate } from "./hourJustification.js";
 import { listPendingShopOrdersForUser, rejectShopOrderWithRefund, toReviewParticipantShopOrder } from "./shopItems.js";
 import { isHackClubCdnUrl, safeHackClubCdnUrl, assertJournalDescriptionMediaIsCdnOnly } from "./cdnLinks.js";
@@ -1224,6 +1233,8 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
   if (!deletionReason) throw new Error("A reason is required to delete a project.");
 
   const client = await pool.connect();
+  let deletionId = null;
+  let deleted = false;
   try {
     await client.query("BEGIN");
 
@@ -1262,10 +1273,11 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
     const coinShortfall = Math.max(0, coinClawback - balanceBefore);
     const cleanupSnapshot = {
       project,
+      projectRecordExpected: Boolean(project.airtable_record_id || hasAirtableProjectsConfig),
       submissionRecordIds: submissionsResult.rows.map((submission) => submission.airtable_record_id).filter(Boolean),
     };
 
-    await client.query(
+    const deletionRecordResult = await client.query(
       `
         INSERT INTO project_deletion_records (
           project_id, project_owner_id, project_name, deleted_by_user_id, deletion_reason,
@@ -1273,6 +1285,7 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
           coin_balance_after, coin_shortfall
         )
         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11)
+        RETURNING id
       `,
       [
         project.id,
@@ -1288,16 +1301,30 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
         coinShortfall,
       ]
     );
+    deletionId = deletionRecordResult.rows[0].id;
 
     const result = await client.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+    if (result.rowCount !== 1) {
+      throw new Error("Project changed while it was being deleted.");
+    }
     await client.query("COMMIT");
-    return result.rowCount > 0;
+    deleted = true;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
   }
+
+  if (deleted && deletionId) {
+    try {
+      await processPendingProjectDeletions({ deletionId });
+    } catch (error) {
+      console.error("[project-deletions] immediate cleanup attempt failed:", error);
+    }
+  }
+
+  return deleted;
 }
 
 export async function deleteProjectForUser(userId, projectId) {

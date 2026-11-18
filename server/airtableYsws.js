@@ -677,17 +677,25 @@ async function getProjectContext(projectId) {
 async function deleteLocalSubmission(submission) {
   if (!submission) return;
 
-  if (submission.airtable_record_id && hasAirtableYswsConfig) {
-    try {
-      await airtableRequest(`/${submission.airtable_record_id}`, { method: "DELETE" });
-    } catch (error) {
-      if (!/404|NOT_FOUND/i.test(String(error.message))) {
-        throw error;
-      }
+  await deleteYswsSubmissionFromAirtable(submission.airtable_record_id);
+
+  await pool.query("DELETE FROM ysws_project_submissions WHERE id = $1", [submission.id]);
+}
+
+export async function deleteYswsSubmissionFromAirtable(recordId) {
+  if (!recordId || !hasAirtableYswsConfig) {
+    return { ok: true, skipped: true, reason: "Airtable YSWS is not configured or the record ID is missing." };
+  }
+
+  try {
+    await airtableRequest(`/${recordId}`, { method: "DELETE" });
+  } catch (error) {
+    if (!/404|NOT_FOUND/i.test(String(error.message))) {
+      throw error;
     }
   }
 
-  await pool.query("DELETE FROM ysws_project_submissions WHERE id = $1", [submission.id]);
+  return { ok: true, skipped: false, recordId };
 }
 
 async function findOpenYswsSubmission(projectId) {

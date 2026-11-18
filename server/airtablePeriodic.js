@@ -10,6 +10,7 @@ import {
   syncAllShopOrdersToAirtable,
 } from "./airtableOrders.js";
 import { getYswsAirtableConfigStatus, hasAirtableYswsConfig, syncAllYswsSubmissions } from "./airtableYsws.js";
+import { processPendingProjectDeletions } from "./projectDeletions.js";
 
 const syncIntervalMs = Number(process.env.AIRTABLE_SYNC_INTERVAL_MS || 5 * 60 * 1000);
 
@@ -53,9 +54,15 @@ export async function syncAllUsersAndProjectsToAirtable() {
     projects: { synced: 0, failed: 0, skipped: 0 },
     ysws: { synced: 0, failed: 0, skippedProjects: 0, total: 0 },
     orders: { synced: 0, failed: 0, total: 0 },
+    projectDeletions: { completed: 0, failed: 0, pending: 0 },
   };
 
   try {
+    result.projectDeletions = await processPendingProjectDeletions();
+    if (result.projectDeletions.failed > 0) {
+      result.ok = false;
+    }
+
     if (hasAirtableUsersConfig) {
       const usersResult = await pool.query(`
         SELECT
