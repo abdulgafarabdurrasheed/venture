@@ -2,6 +2,7 @@ import { persistOrderAirtableRecordId, syncShopOrderToAirtable } from "./airtabl
 import { MIN_PURCHASE_USD, usdToCoins } from "./coinRates.js";
 import { pool } from "./db.js";
 import { normalizeShopLabelColor, shopLabelColorHex } from "./shopLabelColors.js";
+import { setCoinLedgerContext } from "./coinLedger.js";
 
 const SHOP_ITEM_COLUMNS = [
   "name",
@@ -481,6 +482,7 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
       }
     }
 
+    await setCoinLedgerContext(client, { reason: "shop_purchase", referenceType: "shop_item", referenceId: itemId, actorUserId: userId });
     const userResult = await client.query(
       `
         UPDATE users
@@ -748,7 +750,7 @@ export async function markShopOrderFulfilled(orderId) {
   return order;
 }
 
-export async function rejectShopOrderWithRefund(orderId) {
+export async function rejectShopOrderWithRefund(orderId, actorUserId = null) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const client = await pool.connect();
@@ -769,6 +771,7 @@ export async function rejectShopOrderWithRefund(orderId) {
     if (order.fulfilled) throw new Error("Fulfilled orders cannot be rejected.");
     if (order.rejected) throw new Error("Order is already rejected.");
 
+    await setCoinLedgerContext(client, { reason: "shop_order_refund", referenceType: "shop_order", referenceId: orderId, actorUserId });
     await client.query("UPDATE users SET coins = coins + $1, updated_at = NOW() WHERE id = $2", [
       Number(order.total_coins ?? 0),
       order.user_id,

@@ -9,6 +9,7 @@ import { ensureUsersTable } from "./users.js";
 import { isProduction } from "./security.js";
 import { migrateBrickColumnsToCoins } from "./coinSchema.js";
 import { ensureNotificationsTable } from "./notifications.js";
+import { ensureCoinLedgerTable } from "./coinLedger.js";
 
 /** Tables created by ensure*Table on boot — used for post-migrate verification. */
 export const EXPECTED_TABLES = [
@@ -21,6 +22,7 @@ export const EXPECTED_TABLES = [
   "shop_orders",
   "audit_log",
   "notifications",
+  "user_coin_ledger",
 ];
 
 export function assertDatabaseConfiguredInProduction() {
@@ -36,6 +38,7 @@ export async function ensureDatabaseSchema() {
 
   await migrateBrickColumnsToCoins();
   await ensureUsersTable();
+  await ensureCoinLedgerTable();
   await ensureProjectsTable();
   await ensureShopItemsTable();
   await ensureAuditLogTable();
