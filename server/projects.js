@@ -1347,14 +1347,41 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
 export async function deleteProjectForUser(userId, projectId) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
-  const checkResult = await pool.query("SELECT shipped FROM projects WHERE id = $1 AND user_id = $2", [projectId, userId]);
-  const project = checkResult.rows[0];
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const checkResult = await client.query(
+      `SELECT shipped, status, coins_earned, approved_hours, past_approved_hours
+       FROM projects
+       WHERE id = $1 AND user_id = $2
+       FOR UPDATE`,
+      [projectId, userId]
+    );
+    const project = checkResult.rows[0];
 
-  if (!project) return false;
-  if (project.shipped) throw new Error("Cannot delete a project that has been shipped.");
+    if (!project) {
+      await client.query("COMMIT");
+      return false;
+    }
+    if (project.shipped) throw new Error("Cannot delete a project that has been shipped.");
+    if (
+      project.status === "approved" ||
+      Number(project.coins_earned ?? 0) > 0 ||
+      Number(project.approved_hours ?? 0) > 0 ||
+      Number(project.past_approved_hours ?? 0) > 0
+    ) {
+      throw new Error("Projects with prior approvals or earned coins cannot be deleted.");
+    }
 
-  const result = await pool.query("DELETE FROM projects WHERE id = $1 AND user_id = $2", [projectId, userId]);
-  return result.rowCount > 0;
+    const result = await client.query("DELETE FROM projects WHERE id = $1 AND user_id = $2", [projectId, userId]);
+    await client.query("COMMIT");
+    return result.rowCount > 0;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listJournalEntriesForUserProject(userId, projectId) {
