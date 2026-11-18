@@ -74,7 +74,7 @@ export async function ensureShopItemsTable() {
     CREATE TABLE IF NOT EXISTS shop_orders (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      item_id BIGINT NOT NULL REFERENCES shop_items(id) ON DELETE CASCADE,
+      item_id BIGINT REFERENCES shop_items(id) ON DELETE SET NULL,
       quantity INTEGER NOT NULL DEFAULT 1,
       total_coins NUMERIC(10, 2) NOT NULL,
       fulfilled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -110,11 +110,57 @@ export async function ensureShopItemsTable() {
   await pool.query(`
     ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS airtable_record_id VARCHAR
   `);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS item_name_snapshot VARCHAR`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS item_price_snapshot NUMERIC(10, 2)`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS item_price_usd_snapshot NUMERIC(10, 2)`);
 
   await migrateLegacyShopOrdersSchema();
 
+  await pool.query(`
+    UPDATE shop_orders
+    SET item_name_snapshot = shop_items.name,
+        item_price_snapshot = shop_items.price,
+        item_price_usd_snapshot = shop_items.price_usd
+    FROM shop_items
+    WHERE shop_orders.item_id = shop_items.id
+      AND (shop_orders.item_name_snapshot IS NULL
+        OR shop_orders.item_price_snapshot IS NULL
+        OR shop_orders.item_price_usd_snapshot IS NULL)
+  `);
+  await preserveShopOrderItemHistory();
+
   for (const column of REMOVED_SHOP_ORDER_COLUMNS) {
     await pool.query(`ALTER TABLE shop_orders DROP COLUMN IF EXISTS ${column}`);
+  }
+}
+
+async function preserveShopOrderItemHistory() {
+  const constraints = await pool.query(`
+    SELECT constraint_row.conname, constraint_row.confdeltype
+    FROM pg_constraint AS constraint_row
+    JOIN pg_class AS table_row ON table_row.oid = constraint_row.conrelid
+    JOIN pg_attribute AS column_row
+      ON column_row.attrelid = table_row.oid
+      AND column_row.attnum = ANY(constraint_row.conkey)
+    WHERE table_row.relname = 'shop_orders'
+      AND constraint_row.contype = 'f'
+      AND constraint_row.confrelid = 'shop_items'::regclass
+      AND column_row.attname = 'item_id'
+  `);
+
+  for (const constraint of constraints.rows) {
+    if (constraint.confdeltype === "n") continue;
+    await pool.query(`ALTER TABLE shop_orders DROP CONSTRAINT ${quoteIdentifier(constraint.conname)}`);
+  }
+
+  await pool.query(`ALTER TABLE shop_orders ALTER COLUMN item_id DROP NOT NULL`);
+  const hasSetNullConstraint = constraints.rows.some((constraint) => constraint.confdeltype === "n");
+  if (!hasSetNullConstraint) {
+    await pool.query(`
+      ALTER TABLE shop_orders
+      ADD CONSTRAINT shop_orders_item_id_history_fkey
+      FOREIGN KEY (item_id) REFERENCES shop_items(id) ON DELETE SET NULL
+    `);
   }
 }
 
@@ -457,11 +503,14 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
 
     const orderResult = await client.query(
       `
-        INSERT INTO shop_orders (user_id, item_id, quantity, total_coins, total_usd, item_usage, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+        INSERT INTO shop_orders (
+          user_id, item_id, item_name_snapshot, item_price_snapshot, item_price_usd_snapshot,
+          quantity, total_coins, total_usd, item_usage, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
         RETURNING id
       `,
-      [userId, itemId, quantity, totalCoins, amountUsd, itemUsage]
+      [userId, itemId, item.name, item.price, item.price_usd, quantity, totalCoins, amountUsd, itemUsage]
     );
 
     await client.query("COMMIT");
@@ -595,6 +644,10 @@ function dateOrNull(value) {
   return text;
 }
 
+function quoteIdentifier(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
 export async function listShopOrders() {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
@@ -604,9 +657,9 @@ export async function listShopOrders() {
       o.user_id,
       u.email,
       o.item_id,
-      i.name as item_name,
-      i.price as item_coins,
-      i.price_usd as item_price_usd,
+      COALESCE(o.item_name_snapshot, i.name, 'Deleted shop item') AS item_name,
+      COALESCE(o.item_price_snapshot, i.price) AS item_coins,
+      COALESCE(o.item_price_usd_snapshot, i.price_usd) AS item_price_usd,
       o.quantity,
       o.total_coins,
       o.total_usd,
@@ -616,7 +669,7 @@ export async function listShopOrders() {
       o.created_at
     FROM shop_orders o
     JOIN users u ON o.user_id = u.id
-    JOIN shop_items i ON o.item_id = i.id
+    LEFT JOIN shop_items i ON o.item_id = i.id
     ORDER BY o.created_at DESC
   `);
 
@@ -633,9 +686,9 @@ export async function listShopOrdersForUser(userId) {
         o.user_id,
         u.email,
         o.item_id,
-        i.name as item_name,
-        i.price as item_coins,
-        i.price_usd as item_price_usd,
+        COALESCE(o.item_name_snapshot, i.name, 'Deleted shop item') AS item_name,
+        COALESCE(o.item_price_snapshot, i.price) AS item_coins,
+        COALESCE(o.item_price_usd_snapshot, i.price_usd) AS item_price_usd,
         o.quantity,
         o.total_coins,
         o.total_usd,
@@ -645,7 +698,7 @@ export async function listShopOrdersForUser(userId) {
         o.created_at
       FROM shop_orders o
       JOIN users u ON o.user_id = u.id
-      JOIN shop_items i ON o.item_id = i.id
+      LEFT JOIN shop_items i ON o.item_id = i.id
       WHERE o.user_id = $1
       ORDER BY o.created_at DESC
     `,
@@ -754,10 +807,10 @@ async function getShopOrderRowForAirtableSync(orderId) {
       SELECT
         o.*,
         u.email,
-        i.name AS item_name
+        COALESCE(o.item_name_snapshot, i.name, 'Deleted shop item') AS item_name
       FROM shop_orders o
       JOIN users u ON o.user_id = u.id
-      JOIN shop_items i ON o.item_id = i.id
+      LEFT JOIN shop_items i ON o.item_id = i.id
       WHERE o.id = $1
     `,
     [orderId]
@@ -823,9 +876,9 @@ function toPublicShopOrder(row) {
     userId: row.user_id,
     email: row.email,
     itemId: row.item_id,
-    itemName: row.item_name,
-    itemCoins: row.item_coins,
-    itemPriceUsd: row.item_price_usd,
+    itemName: row.item_name ?? row.item_name_snapshot ?? "Deleted shop item",
+    itemCoins: row.item_coins ?? row.item_price_snapshot,
+    itemPriceUsd: row.item_price_usd ?? row.item_price_usd_snapshot,
     quantity: row.quantity,
     totalCoins: row.total_coins,
     totalUsd: row.total_usd,
