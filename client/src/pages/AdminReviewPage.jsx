@@ -284,6 +284,8 @@ function AdminReviewDetail({ projectId }) {
   const [status, setStatus] = useState("Loading project...");
   const [message, setMessage] = useState("");
   const [fraudSaving, setFraudSaving] = useState(false);
+  const [awardStars, setAwardStars] = useState("0");
+  const [starsSaving, setStarsSaving] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [exceedModalOpen, setExceedModalOpen] = useState(false);
   const [exceedAcknowledged, setExceedAcknowledged] = useState(false);
@@ -305,6 +307,7 @@ function AdminReviewDetail({ projectId }) {
       const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.error || "Failed to load project.");
       setProject(data.project);
+      setAwardStars(String(data.project?.stars ?? 0));
       setJournalEntries(data.journalEntries || []);
       setApprovedHours("");
       setReducedApprovedHours("");
@@ -340,6 +343,35 @@ function AdminReviewDetail({ projectId }) {
       setMessage(err.message);
     } finally {
       setFraudSaving(false);
+    }
+  }
+
+  async function saveProjectStars() {
+    if (!project) return;
+    const stars = Number(awardStars);
+    if (!Number.isInteger(stars) || stars < 0 || stars > 5) {
+      setMessage("Choose between 0 and 5 stars.");
+      return;
+    }
+
+    setStarsSaving(true);
+    setMessage("");
+    try {
+      const response = await apiFetch(`/api/admin/review/projects/${project.id}/star`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stars }),
+      });
+      const data = await readJsonResponse(response);
+      if (!response.ok) throw new Error(data.error || "Could not update project stars.");
+      setProject((current) => (current ? { ...current, stars: Number(data.stars ?? stars) } : current));
+      setAwardStars(String(data.stars ?? stars));
+      setMessage(`Project stars set to ${data.stars ?? stars}.`);
+    } catch (error) {
+      setMessage(error.message || "Could not update project stars.");
+    } finally {
+      setStarsSaving(false);
     }
   }
 
@@ -688,6 +720,32 @@ function AdminReviewDetail({ projectId }) {
           <span>Fraud flag</span>
           {fraudSaving ? <small className="admin-review-fraud-saving">Saving…</small> : null}
         </label>
+
+        <section className="admin-review-panel admin-review-stars" aria-label="Project stars">
+          <h2>Project stars</h2>
+          <p>Set this project&apos;s total from 0 to 5 stars. The participant&apos;s total updates with the difference.</p>
+          <div className="admin-review-stars__controls">
+            <label>
+              <span>Stars</span>
+              <select value={awardStars} disabled={starsSaving} onChange={(event) => setAwardStars(event.target.value)}>
+                {[0, 1, 2, 3, 4, 5].map((stars) => (
+                  <option key={stars} value={stars}>
+                    {stars}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="admin-review-submit admin-review-stars__save"
+              type="button"
+              disabled={starsSaving}
+              onClick={saveProjectStars}
+            >
+              {starsSaving ? "Saving…" : "Save stars"}
+            </button>
+          </div>
+          <p className="admin-review-stars__current">Currently awarded: {Number(project.stars) || 0}</p>
+        </section>
 
         <div className={`admin-review-time-row${reviewHistory.length > 0 ? " has-history" : ""}`}>
           <section className="admin-review-panel admin-review-time-panel">

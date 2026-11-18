@@ -13,6 +13,7 @@ export function ShopPage() {
   const [page, setPage] = useState(0);
   const [selectedItem, setSelectedItem] = useState(null);
   const [purchaseMessage, setPurchaseMessage] = useState("");
+  const userStars = Number(user?.totalStars) || 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -101,7 +102,7 @@ export function ShopPage() {
           ) : (
             <div className="shop-page__grid">
               {visibleItems.map((item) => (
-                <ShopItemCard key={item.id} item={item} onOpen={setSelectedItem} />
+                <ShopItemCard key={item.id} item={item} userStars={userStars} onOpen={setSelectedItem} />
               ))}
             </div>
           )}

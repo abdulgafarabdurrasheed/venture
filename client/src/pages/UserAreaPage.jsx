@@ -90,6 +90,9 @@ export function UserAreaPage() {
                 <span>Approved hours:</span> {formatHourStat(stats.approvedHours)}
               </p>
               <p>
+                <span>Total stars:</span> {Number(user?.totalStars) || 0}
+              </p>
+              <p>
                 <span>Rejected hours:</span> {formatHourStat(stats.rejectedHours)}
               </p>
               <p className="user-page__stats-gap" aria-hidden="true" />

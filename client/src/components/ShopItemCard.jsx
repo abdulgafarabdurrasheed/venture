@@ -27,9 +27,12 @@ function formatDiscount(value) {
   return Math.round(numeric);
 }
 
-export function ShopItemCard({ item, onOpen, disabled }) {
+export function ShopItemCard({ item, onOpen, disabled, userStars = 0 }) {
   const discount = formatDiscount(item.discountPercent);
   const imageSrc = resolveShopItemImage(item);
+  const requiredStars = Math.max(0, Number(item.requiredStars) || 0);
+  const locked = requiredStars > Number(userStars);
+  const buyDisabled = Boolean(disabled || locked);
   const usesCustomImage = Boolean(item?.imageUrl);
   const frameLabel = String(item.frameLabel || "").trim();
   const labelHex = item.frameLabelHex || shopLabelColorHex(item.frameLabelColor ?? item.frame_label_color);
@@ -49,6 +52,13 @@ export function ShopItemCard({ item, onOpen, disabled }) {
 
         <div className="shop-item-card__frame-wrap">
           <img className="shop-item-card__frame" src={shopFrame} alt="" aria-hidden="true" draggable={false} />
+
+          {requiredStars > 0 ? (
+            <span className={`shop-item-card__star-lock${locked ? " is-locked" : ""}`}>
+              {locked ? "🔒" : "★"} {requiredStars} {requiredStars === 1 ? "STAR" : "STARS"}
+              {locked ? " NEEDED" : ""}
+            </span>
+          ) : null}
 
           {discount ? (
             <span className="shop-item-card__coin" aria-label={`${discount}% off`}>
@@ -72,8 +82,8 @@ export function ShopItemCard({ item, onOpen, disabled }) {
             type="button"
             className="shop-item-card__buy"
             onClick={() => onOpen?.(item)}
-            disabled={disabled}
-            aria-label={`Buy ${item.name}`}
+            disabled={buyDisabled}
+            aria-label={locked ? `Requires ${requiredStars} stars to buy ${item.name}` : `Buy ${item.name}`}
           >
             <img src={buyBtn} alt="" draggable={false} />
           </button>
