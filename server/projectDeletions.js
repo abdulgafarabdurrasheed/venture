@@ -4,6 +4,7 @@ import {
   deleteYswsSubmissionFromAirtable,
   hasAirtableYswsConfig,
 } from "./airtableYsws.js";
+import { deleteJournalEntriesFromAirtable, hasAirtableJournalsConfig } from "./airtableJournals.js";
 
 export async function ensureProjectDeletionRecordsTable() {
   if (!pool) return;
@@ -148,6 +149,17 @@ export async function processPendingProjectDeletions({ limit = 25, deletionId = 
         } catch (error) {
           errors.push(error instanceof Error ? error.message : String(error));
         }
+      }
+    }
+
+    const journalEntryIds = Array.isArray(cleanup.journalEntryIds) ? cleanup.journalEntryIds : [];
+    if (journalEntryIds.length > 0 && !hasAirtableJournalsConfig) {
+      errors.push("Airtable journals are not configured.");
+    } else if (journalEntryIds.length > 0) {
+      try {
+        await deleteJournalEntriesFromAirtable(journalEntryIds);
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
       }
     }
 

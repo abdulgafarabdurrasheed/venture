@@ -1282,6 +1282,7 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
       project,
       projectRecordExpected: Boolean(project.airtable_record_id || hasAirtableProjectsConfig),
       submissionRecordIds: submissionsResult.rows.map((submission) => submission.airtable_record_id).filter(Boolean),
+      journalEntryIds: journalEntriesResult.rows.map((entry) => entry.id),
     };
 
     const deletionRecordResult = await client.query(

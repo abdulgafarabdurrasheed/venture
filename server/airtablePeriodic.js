@@ -1,5 +1,6 @@
 import { pool } from "./db.js";
 import { STACK_LAUNCH_UTC } from "./hackatimeAuth.js";
+import { hasAirtableJournalsConfig } from "./airtableJournals.js";
 
 const STACK_LAUNCH_TIMESTAMPTZ = STACK_LAUNCH_UTC.toISOString();
 import { hasAirtableProjectsConfig, syncProjectToAirtable, persistProjectAirtableRecordId } from "./airtableProjects.js";
@@ -25,6 +26,7 @@ export function getPeriodicAirtableSyncStatus() {
     lastSync: lastPeriodicSync,
     usersConfigured: hasAirtableUsersConfig,
     projectsConfigured: hasAirtableProjectsConfig,
+    journalsConfigured: hasAirtableJournalsConfig,
     yswsConfigured: hasAirtableYswsConfig,
     ysws: getYswsAirtableConfigStatus(),
     ordersConfigured: hasAirtableOrdersConfig,
@@ -37,7 +39,13 @@ export async function syncAllUsersAndProjectsToAirtable() {
     return { ok: false, reason: "DATABASE_URL is not set." };
   }
 
-  if (!hasAirtableUsersConfig && !hasAirtableProjectsConfig && !hasAirtableYswsConfig && !hasAirtableOrdersConfig) {
+  if (
+    !hasAirtableUsersConfig &&
+    !hasAirtableProjectsConfig &&
+    !hasAirtableJournalsConfig &&
+    !hasAirtableYswsConfig &&
+    !hasAirtableOrdersConfig
+  ) {
     return { ok: false, reason: "Airtable not configured." };
   }
 

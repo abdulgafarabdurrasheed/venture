@@ -72,3 +72,37 @@ export async function syncJournalEntryToAirtable(row) {
   const data = await response.json();
   return { ok: true, recordId: data.records?.[0]?.id };
 }
+
+export async function deleteJournalEntriesFromAirtable(journalEntryIds) {
+  if (!hasAirtableJournalsConfig) {
+    return { ok: true, skipped: true, reason: "Airtable journals not configured." };
+  }
+
+  let deleted = 0;
+  for (const journalEntryId of journalEntryIds || []) {
+    const escapedId = String(journalEntryId).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const formula = encodeURIComponent(`{id}='${escapedId}'`);
+    const lookupResponse = await fetch(`${getJournalsTableUrl()}?filterByFormula=${formula}`, {
+      headers: getAirtableHeaders(),
+    });
+    if (!lookupResponse.ok) {
+      const details = await lookupResponse.text();
+      throw new Error(`Airtable journal lookup failed (${lookupResponse.status}): ${details}`);
+    }
+
+    const lookupData = await lookupResponse.json();
+    for (const record of lookupData.records || []) {
+      const deleteResponse = await fetch(`${getJournalsTableUrl()}/${encodeURIComponent(record.id)}`, {
+        method: "DELETE",
+        headers: getAirtableHeaders(),
+      });
+      if (!deleteResponse.ok && deleteResponse.status !== 404) {
+        const details = await deleteResponse.text();
+        throw new Error(`Airtable journal deletion failed (${deleteResponse.status}): ${details}`);
+      }
+      deleted += 1;
+    }
+  }
+
+  return { ok: true, deleted };
+}
