@@ -896,7 +896,7 @@ app.post("/api/admin/review/projects/:id/participant-orders/:orderId/reject", re
 
 app.delete("/api/admin/review/projects/:id", requireSuperAdmin, async (req, res) => {
   try {
-    const deleted = await deleteProjectBySuperadmin(req.params.id);
+    const deleted = await deleteProjectBySuperadmin(req.params.id, req.session.userId, req.body?.reason);
     if (!deleted) {
       res.status(404).json({ error: "Project not found." });
       return;
