@@ -1,4 +1,5 @@
 import { pool } from "./db.js";
+import { setCoinLedgerContext } from "./coinLedger.js";
 
 export async function ensureAuditLogTable() {
   if (!pool) return;
@@ -62,6 +63,12 @@ export async function adjustUserCoins(adminUserId, targetUserId, { delta, reason
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await setCoinLedgerContext(client, {
+      reason: textOrNull(reason) ? `admin_adjustment: ${textOrNull(reason)}` : "admin_adjustment",
+      referenceType: "user",
+      referenceId: targetUserId,
+      actorUserId: adminUserId,
+    });
 
     const result = await client.query(
       `UPDATE users
@@ -92,6 +99,12 @@ export async function adjustUserCoins(adminUserId, targetUserId, { delta, reason
   } finally {
     client.release();
   }
+}
+
+function textOrNull(value) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text || null;
 }
 
 export async function getAdminStats() {

@@ -13,6 +13,7 @@ import {
   sumHackatimeHoursForNames,
 } from "./hackatimeAuth.js";
 import { COINS_PER_APPROVED_HOUR } from "./coinRates.js";
+import { setCoinLedgerContext } from "./coinLedger.js";
 
 export { COINS_PER_APPROVED_HOUR };
 
@@ -820,6 +821,7 @@ export async function approveAdminReviewProject(adminId, projectId, input = {}) 
     );
     const approvedRow = updatedProjectResult.rows[0];
 
+    await setCoinLedgerContext(client, { reason: "project_approved", referenceType: "project", referenceId: projectId, actorUserId: adminId });
     await client.query("UPDATE users SET coins = coins + $1, updated_at = NOW() WHERE id = $2", [coinsDelta, project.user_id]);
     await recordProjectReviewFeedback(client, {
       projectId,
@@ -1103,6 +1105,7 @@ export async function reduceAdminReviewProjectHours(adminId, projectId, input = 
     const updatedRow = updatedProjectResult.rows[0];
 
     if (coinsDeducted > 0) {
+      await setCoinLedgerContext(client, { reason: "project_hours_reduced", referenceType: "project", referenceId: projectId, actorUserId: adminId });
       await client.query("UPDATE users SET coins = coins - $1, updated_at = NOW() WHERE id = $2", [
         coinsDeducted,
         project.user_id,
@@ -1160,7 +1163,7 @@ export async function getParticipantPendingOrdersForReview(projectId) {
   };
 }
 
-export async function rejectParticipantOrderForReview(projectId, orderId) {
+export async function rejectParticipantOrderForReview(projectId, orderId, reviewerUserId = null) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const projectResult = await pool.query(`SELECT user_id FROM projects WHERE id = $1`, [projectId]);
@@ -1174,7 +1177,7 @@ export async function rejectParticipantOrderForReview(projectId, orderId) {
     throw new Error("Order does not belong to this project participant.");
   }
 
-  const rejectedOrder = await rejectShopOrderWithRefund(orderId);
+  const rejectedOrder = await rejectShopOrderWithRefund(orderId, reviewerUserId);
   const refreshed = await getParticipantPendingOrdersForReview(projectId);
   return { order: toReviewParticipantShopOrder(rejectedOrder), ...refreshed };
 }
@@ -1221,6 +1224,7 @@ export async function deleteProjectBySuperadmin(projectId) {
     
     // Claw back any coins earned by this project before deleting it
     if (row.coins_earned && Number(row.coins_earned) > 0) {
+      await setCoinLedgerContext(client, { reason: "project_deleted_clawback", referenceType: "project", referenceId: projectId });
       await client.query(
         "UPDATE users SET coins = GREATEST(0, coins - $1), updated_at = NOW() WHERE id = $2",
         [row.coins_earned, row.user_id]

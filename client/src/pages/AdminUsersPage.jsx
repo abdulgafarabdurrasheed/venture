@@ -35,6 +35,7 @@ function StatusBadge({ status }) {
 function UserDetailView({ userId }) {
   const [user, setUser] = useState(null);
   const [audit, setAudit] = useState([]);
+  const [coinLedger, setCoinLedger] = useState([]);
   const [status, setStatus] = useState("Loading…");
   const [error, setError] = useState("");
   const [balanceDelta, setBalanceDelta] = useState("");
@@ -48,11 +49,13 @@ function UserDetailView({ userId }) {
     Promise.all([
       apiFetch(`/api/admin/users/${userId}`, { credentials: "include" }).then((r) => r.json()),
       apiFetch(`/api/admin/users/${userId}/audit`, { credentials: "include" }).then((r) => r.json()),
+      apiFetch(`/api/admin/users/${userId}/coin-ledger`, { credentials: "include" }).then((r) => r.json()),
     ])
-      .then(([userData, auditData]) => {
+      .then(([userData, auditData, ledgerData]) => {
         if (userData.error) throw new Error(userData.error);
         setUser(userData.user);
         setAudit(auditData.entries || []);
+        setCoinLedger(ledgerData.entries || []);
         setStatus("");
       })
       .catch((err) => {
@@ -286,6 +289,40 @@ function UserDetailView({ userId }) {
           </form>
           {balanceStatus ? <p className="auser-balance-ok">{balanceStatus}</p> : null}
           {balanceError ? <p className="admin-users-error">{balanceError}</p> : null}
+        </section>
+
+        <section className="auser-audit">
+          <h2 className="auser-section-title">Coin History</h2>
+          {coinLedger.length > 0 ? (
+            <div className="admin-users-table-wrap">
+              <table className="admin-users-table">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Change</th>
+                    <th>Balance after</th>
+                    <th>Reason</th>
+                    <th>Reference</th>
+                    <th>By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coinLedger.map((entry) => (
+                    <tr key={entry.id}>
+                      <td>{formatDate(entry.createdAt)}</td>
+                      <td>{fmt(entry.amount, 2)}</td>
+                      <td>{fmt(entry.balanceAfter, 2)}</td>
+                      <td>{entry.reason}</td>
+                      <td>{entry.referenceType ? `${entry.referenceType} ${entry.referenceId || ""}`.trim() : "—"}</td>
+                      <td>{entry.actorUserId ? `User #${entry.actorUserId}` : "System"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="auser-muted">No coin history yet.</p>
+          )}
         </section>
 
         {/* Audit log */}
