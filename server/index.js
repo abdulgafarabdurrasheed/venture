@@ -83,6 +83,7 @@ import {
   listAdminUsers,
 } from "./users.js";
 import { getUserDashboard } from "./userDashboard.js";
+import { listUserCoinLedger } from "./coinLedger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -872,7 +873,7 @@ app.get("/api/admin/review/projects/:id/participant-pending-orders", requireStaf
 
 app.post("/api/admin/review/projects/:id/participant-orders/:orderId/reject", requireStaffReview, async (req, res) => {
   try {
-    const result = await rejectParticipantOrderForReview(req.params.id, req.params.orderId);
+    const result = await rejectParticipantOrderForReview(req.params.id, req.params.orderId, req.session.userId);
     res.json(result);
   } catch (error) {
     console.error("Failed to reject participant order from review:", error);
@@ -988,7 +989,7 @@ app.post("/api/admin/shop/orders/:id/fulfill", requireFullAdmin, async (req, res
 
 app.post("/api/admin/shop/orders/:id/reject", requireFullAdmin, async (req, res) => {
   try {
-    const order = await rejectShopOrderWithRefund(req.params.id);
+    const order = await rejectShopOrderWithRefund(req.params.id, req.session?.userId);
     res.json({ order });
   } catch (error) {
     console.error("Failed to reject shop order:", error);
@@ -1055,6 +1056,16 @@ app.get("/api/admin/users/:id/audit", requireFullAdmin, async (req, res) => {
   } catch (error) {
     console.error("Failed to load audit log:", error);
     res.status(500).json({ error: "Failed to load audit log." });
+  }
+});
+
+app.get("/api/admin/users/:id/coin-ledger", requireFullAdmin, async (req, res) => {
+  try {
+    const entries = await listUserCoinLedger(req.params.id, req.query.limit);
+    res.json({ entries });
+  } catch (error) {
+    console.error("Failed to load user coin ledger:", error);
+    res.status(500).json({ error: "Failed to load coin history." });
   }
 });
 
