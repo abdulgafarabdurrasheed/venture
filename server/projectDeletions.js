@@ -169,7 +169,8 @@ export async function processPendingProjectDeletions({ limit = 25, deletionId = 
         UPDATE project_deletion_records
         SET external_cleanup_attempts = external_cleanup_attempts + 1,
             external_cleanup_last_error = $2,
-            external_cleanup_completed_at = CASE WHEN $2::text IS NULL THEN NOW() ELSE NULL END
+            external_cleanup_completed_at = CASE WHEN $2::text IS NULL THEN NOW() ELSE NULL END,
+            cleanup_snapshot = CASE WHEN $2::text IS NULL THEN '{}'::jsonb ELSE cleanup_snapshot END
         WHERE id = $1 AND external_cleanup_completed_at IS NULL
       `,
       [record.id, lastError]

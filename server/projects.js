@@ -1278,9 +1278,17 @@ export async function deleteProjectBySuperadmin(projectId, deletedByUserId, reas
     const projectAuditSnapshot = Object.fromEntries(
       Object.entries(project).filter(([key]) => key !== "user_email" && key !== "user_slack_id")
     );
+    const projectRecordExpected = Boolean(project.airtable_record_id || hasAirtableProjectsConfig);
     const cleanupSnapshot = {
-      project,
-      projectRecordExpected: Boolean(project.airtable_record_id || hasAirtableProjectsConfig),
+      project: projectRecordExpected
+        ? {
+            id: project.id,
+            name: project.name,
+            user_email: project.user_email,
+            airtable_record_id: project.airtable_record_id,
+          }
+        : null,
+      projectRecordExpected,
       submissionRecordIds: submissionsResult.rows.map((submission) => submission.airtable_record_id).filter(Boolean),
       journalEntryIds: journalEntriesResult.rows.map((entry) => entry.id),
     };
