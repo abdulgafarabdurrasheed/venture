@@ -283,6 +283,10 @@
   opacity: 0.45;
 }
 
+.admin-shop-table tr.is-deleted {
+  opacity: 0.55;
+}
+
 .admin-shop-order-controls-cell {
   display: flex;
   align-items: center;

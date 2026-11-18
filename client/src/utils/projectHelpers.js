@@ -213,6 +213,16 @@ export function displayStatus(project) {
   return project.status || "Draft";
 }
 
+export function isProjectUnderReview(project) {
+  if (!project || project.reviewed) return false;
+  const status = String(project.status || "").toLowerCase();
+  return (
+    (status === "in-review" && Boolean(project.shipped)) ||
+    status === "pending-reship" ||
+    (Boolean(project.shipped) && (project.shipKind ?? project.ship_kind) === "reship")
+  );
+}
+
 export function formatHours(value) {
   return Number(value ?? 0).toFixed(2);
 }

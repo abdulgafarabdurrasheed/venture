@@ -39,6 +39,7 @@ export function JournalModal({
   onCancelEdit,
   onClose,
   onSubmit,
+  readOnly = false,
 }) {
   const [linkError, setLinkError] = useState("");
   const [cdnLinkInput, setCdnLinkInput] = useState("");
@@ -67,83 +68,90 @@ export function JournalModal({
 
   return (
     <ModalShell title={`${project.name} — Journal`} onClose={onClose} className="journal-modal--wide">
-      {editingEntryId ? <p className="journal-modal__edit-hint">Editing an unshipped journal entry.</p> : null}
+      {readOnly ? (
+        <p className="journal-modal__edit-hint">This submission is under review. Journal entries are read-only until review is complete.</p>
+      ) : null}
+      {!readOnly && editingEntryId ? (
+        <p className="journal-modal__edit-hint">Editing an unshipped journal entry.</p>
+      ) : null}
 
-      <form
-        className="journal-modal__form"
-        onSubmit={(event) => {
-          if (!journalDescriptionMediaIsCdnOnly(form.description)) {
-            event.preventDefault();
-            setLinkError("Attachments must be Hack Club CDN links from #cdn on Slack.");
-            return;
-          }
-          onSubmit(event);
-        }}
-      >
-        <label>
-          Time done
-          <input
-            type="datetime-local"
-            value={form.timeDone}
-            onChange={(event) => onChange("timeDone", event.target.value)}
-          />
-        </label>
-        <label>
-          Hours worked
-          <input
-            type="number"
-            min="0"
-            step="0.25"
-            value={form.hoursWorked}
-            onChange={(event) => onChange("hoursWorked", event.target.value)}
-            required
-          />
-        </label>
-        <label>
-          Description
-          <p className="journal-modal__cdn-hint">{CDN_UPLOAD_HELP}</p>
-          <textarea
-            ref={textareaRef}
-            value={form.description}
-            onChange={(event) => onChange("description", event.target.value)}
-            required
-            placeholder="Describe what you worked on…"
-          />
-          <div className="journal-modal__cdn-row">
+      {!readOnly ? (
+        <form
+          className="journal-modal__form"
+          onSubmit={(event) => {
+            if (!journalDescriptionMediaIsCdnOnly(form.description)) {
+              event.preventDefault();
+              setLinkError("Attachments must be Hack Club CDN links from #cdn on Slack.");
+              return;
+            }
+            onSubmit(event);
+          }}
+        >
+          <label>
+            Time done
             <input
-              type="url"
-              className="journal-modal__cdn-input"
-              value={cdnLinkInput}
-              onChange={(event) => {
-                setCdnLinkInput(event.target.value);
-                setLinkError("");
-              }}
-              placeholder="https://cdn.hackclub.com/…"
+              type="datetime-local"
+              value={form.timeDone}
+              onChange={(event) => onChange("timeDone", event.target.value)}
             />
-            <button type="button" onClick={insertCdnLink}>
-              Add media link
-            </button>
-          </div>
-          {linkError ? <p className="journal-modal__error">{linkError}</p> : null}
-          <small className="journal-modal__hint">Inserts an image or video line into your description.</small>
-        </label>
-        <label>
-          Tools used
-          <input
-            value={form.toolsUsed}
-            onChange={(event) => onChange("toolsUsed", event.target.value)}
-            placeholder="React, Figma, CAD"
-          />
-        </label>
-        <button type="submit" className="journal-modal__submit">
-          {editingEntryId ? "Update entry" : "Save entry"}
-        </button>
-        {editingEntryId ? (
-          <button type="button" className="journal-modal__cancel-edit" onClick={onCancelEdit}>
-            Cancel edit
+          </label>
+          <label>
+            Hours worked
+            <input
+              type="number"
+              min="0"
+              step="0.25"
+              value={form.hoursWorked}
+              onChange={(event) => onChange("hoursWorked", event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Description
+            <p className="journal-modal__cdn-hint">{CDN_UPLOAD_HELP}</p>
+            <textarea
+              ref={textareaRef}
+              value={form.description}
+              onChange={(event) => onChange("description", event.target.value)}
+              required
+              placeholder="Describe what you worked on…"
+            />
+            <div className="journal-modal__cdn-row">
+              <input
+                type="url"
+                className="journal-modal__cdn-input"
+                value={cdnLinkInput}
+                onChange={(event) => {
+                  setCdnLinkInput(event.target.value);
+                  setLinkError("");
+                }}
+                placeholder="https://cdn.hackclub.com/…"
+              />
+              <button type="button" onClick={insertCdnLink}>
+                Add media link
+              </button>
+            </div>
+            {linkError ? <p className="journal-modal__error">{linkError}</p> : null}
+            <small className="journal-modal__hint">Inserts an image or video line into your description.</small>
+          </label>
+          <label>
+            Tools used
+            <input
+              value={form.toolsUsed}
+              onChange={(event) => onChange("toolsUsed", event.target.value)}
+              placeholder="React, Figma, CAD"
+            />
+          </label>
+          <button type="submit" className="journal-modal__submit">
+            {editingEntryId ? "Update entry" : "Save entry"}
           </button>
-        ) : null}
-      </form>
+          {editingEntryId ? (
+            <button type="button" className="journal-modal__cancel-edit" onClick={onCancelEdit}>
+              Cancel edit
+            </button>
+          ) : null}
+        </form>
+      ) : null}
 
       <section className="journal-modal__list" aria-label="Journal entries">
         <h3>Journal entries</h3>
@@ -157,7 +165,7 @@ export function JournalModal({
                   {entry.timeDone ? new Date(entry.timeDone).toLocaleDateString() : "N/A"} — {entry.hoursWorked || 0}{" "}
                   hrs
                 </strong>
-                {entry.editable ? (
+                {!readOnly && entry.editable ? (
                   <button
                     type="button"
                     className="journal-modal__edit-btn"

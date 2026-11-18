@@ -1,16 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "../api/client.js";
-import {
-  COINS_PER_APPROVED_HOUR,
-  COINS_PER_USD,
-  MIN_PURCHASE_USD,
-  USD_PER_APPROVED_HOUR,
-  formatCoins,
-  formatUsd,
-  parsePurchaseUsd,
-  usdToCoins,
-} from "../constants/coinRates.js";
+import { formatCoins, formatUsd } from "../constants/coinRates.js";
 import { resolveShopItemImage } from "../utils/shopItemImages.js";
 import "./ShopPurchaseModal.css";
 
@@ -26,7 +17,6 @@ function emptyAcknowledgments() {
 }
 
 export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
-  const [amountUsd, setAmountUsd] = useState("");
   const [itemUsage, setItemUsage] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -34,7 +24,6 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
   const [acknowledgments, setAcknowledgments] = useState(emptyAcknowledgments);
 
   useEffect(() => {
-    setAmountUsd("");
     setItemUsage("");
     setMessage("");
     setSubmitting(false);
@@ -59,15 +48,14 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
 
   if (!item) return null;
 
-  const parsedUsd = parsePurchaseUsd(amountUsd);
-  const hasValidUsd = parsedUsd !== null;
-  const totalCoins = hasValidUsd ? usdToCoins(parsedUsd) : null;
-  const belowMinimum =
-    amountUsd !== "" && Number.isFinite(Number(amountUsd)) && Number(amountUsd) < MIN_PURCHASE_USD;
+  const grantAmountUsd = Number(item.priceUsd);
+  const totalCoins = Number(item.price);
+  const hasFixedOffer =
+    Number.isFinite(grantAmountUsd) && grantAmountUsd > 0 && Number.isFinite(totalCoins) && totalCoins > 0;
   const availableCoins = Number(userCoins) || 0;
-  const hasEnoughCoins = totalCoins !== null && availableCoins >= totalCoins;
+  const hasEnoughCoins = hasFixedOffer && availableCoins >= totalCoins;
   const hasItemUsage = itemUsage.trim().length > 0;
-  const canPurchase = hasEnoughCoins && hasItemUsage && !submitting;
+  const canPurchase = hasFixedOffer && hasEnoughCoins && hasItemUsage && !submitting;
   const allAcknowledged = GRANT_ACKNOWLEDGMENTS.every((_, index) => acknowledgments[index]);
 
   function handleBuyClick() {
@@ -93,7 +81,7 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
     try {
       const response = await apiFetch(`/api/shop/items/${item.id}/buy`, {
         method: "POST",
-        body: JSON.stringify({ amountUsd: parsedUsd, itemUsage: itemUsage.trim() }),
+        body: JSON.stringify({ itemUsage: itemUsage.trim() }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to buy item.");
@@ -126,11 +114,6 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
         <h2 className="shop-modal__title">{item.name}</h2>
         <p className="shop-modal__description">{item.description || "Travel reward"}</p>
 
-        <p className="shop-modal__rates">
-          Rate: {formatUsd(USD_PER_APPROVED_HOUR)}/approved hour · 1 approved hour = {COINS_PER_APPROVED_HOUR} coins (
-          {COINS_PER_USD} coins per $1)
-        </p>
-
         {item.maxPerPerson ? (
           <div className="shop-modal__row">
             <span>Limit</span>
@@ -144,26 +127,18 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
           </a>
         ) : null}
 
-        <label className="shop-modal__field">
-          <span>Amount needed ($) — min {formatUsd(MIN_PURCHASE_USD)}</span>
-          <input
-            type="number"
-            min={MIN_PURCHASE_USD}
-            step="0.01"
-            inputMode="decimal"
-            placeholder={MIN_PURCHASE_USD.toFixed(2)}
-            value={amountUsd}
-            onChange={(event) => setAmountUsd(event.target.value)}
-          />
-        </label>
+        <div className="shop-modal__row">
+          <span>Fixed grant amount</span>
+          <strong>{hasFixedOffer ? formatUsd(grantAmountUsd) : "Not configured"}</strong>
+        </div>
 
         <label className="shop-modal__field">
-          <span>What will you specifically buy with this grant? *</span>
+          <span>What specific purchase will this grant cover? *</span>
           <textarea
             required
             rows={4}
             maxLength={2000}
-            placeholder="e.g. Round-trip train tickets from Milan to Florence for my project demo trip"
+            placeholder="Describe the item or expense this grant will cover."
             value={itemUsage}
             onChange={(event) => setItemUsage(event.target.value)}
           />
@@ -176,20 +151,20 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
 
         <div className="shop-modal__total">
           <span>Coins required</span>
-          <strong>{totalCoins !== null ? `${formatCoins(totalCoins)} coins` : "—"}</strong>
+          <strong>{hasFixedOffer ? `${formatCoins(totalCoins)} coins` : "—"}</strong>
         </div>
 
-        {belowMinimum ? (
-          <p className="shop-modal__warning">Minimum purchase is {formatUsd(MIN_PURCHASE_USD)}.</p>
+        {!hasFixedOffer ? (
+          <p className="shop-modal__warning">This offer is not configured with a fixed grant amount and coin cost.</p>
         ) : null}
-        {hasValidUsd && !hasEnoughCoins ? (
+        {hasFixedOffer && !hasEnoughCoins ? (
           <p className="shop-modal__warning">
-            Not enough coins. You have {formatCoins(availableCoins)} coins, but {formatUsd(parsedUsd)} requires{" "}
-            {formatCoins(totalCoins)} coins.
+            Not enough coins to claim this offer. You have {formatCoins(availableCoins)} coins and it costs{" "}
+            {formatCoins(totalCoins)}.
           </p>
         ) : null}
-        {hasValidUsd && hasEnoughCoins && !hasItemUsage ? (
-          <p className="shop-modal__warning">Describe what you will buy with this grant before purchasing.</p>
+        {hasFixedOffer && hasEnoughCoins && !hasItemUsage ? (
+          <p className="shop-modal__warning">Describe the specific purchase this grant will cover.</p>
         ) : null}
         {message ? <p className="shop-modal__warning">{message}</p> : null}
 

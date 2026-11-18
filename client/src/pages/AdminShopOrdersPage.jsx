@@ -180,11 +180,10 @@ export function AdminShopOrdersPage() {
                             <span className={`status-badge ${status}`}>{status}</span>
                             <h2>{order.itemName || "Unknown item"}</h2>
                             <p>
-                              Purchase: {formatUsd(orderUsdTotal(order))} · {Number(order.totalCoins ?? 0)} coins
+                              Fixed grant amount: {formatUsd(orderUsdTotal(order))}
                             </p>
                             <div className="admin-shop-order-money">
-                              <span>Amount requested: {formatUsd(orderUsdTotal(order))}</span>
-                              <span>Coins charged: {Number(order.totalCoins ?? 0)}</span>
+                              <span>Coin cost: {Number(order.totalCoins ?? 0)}</span>
                             </div>
 
                             <div className="admin-shop-order-customer">

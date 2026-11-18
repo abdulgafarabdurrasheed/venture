@@ -15,6 +15,7 @@ import {
   getShipLockReason,
   getUnshippedHours,
   isHackClubCdnUrl,
+  isProjectUnderReview,
   isReshipEligibleProject,
   isValidHttpUrl,
   MIN_RESHIP_UPDATE_LENGTH,
@@ -72,6 +73,7 @@ function ProjectReviewerFeedback({ project }) {
 
 export function ProjectDetailModal({ project, onClose, onEdit, onJournal, onDelete, onShip }) {
   const shipLockReason = getShipLockReason(project);
+  const isUnderReview = isProjectUnderReview(project);
   const isReship = isReshipEligibleProject(project);
   const [reshipUpdate, setReshipUpdate] = useState("");
   const [reshipUpdateError, setReshipUpdateError] = useState("");
@@ -169,7 +171,12 @@ export function ProjectDetailModal({ project, onClose, onEdit, onJournal, onDele
       ) : null}
 
       <div className="project-modal__actions">
-        <button type="button" onClick={onEdit}>
+        <button
+          type="button"
+          onClick={onEdit}
+          disabled={isUnderReview}
+          title={isUnderReview ? "Editing is locked while this submission is under review." : "Edit project"}
+        >
           Edit
         </button>
         <button type="button" onClick={onJournal}>
@@ -193,6 +200,9 @@ export function ProjectDetailModal({ project, onClose, onEdit, onJournal, onDele
           Delete
         </button>
       </div>
+      {isUnderReview ? (
+        <p className="project-modal__ship-lock">This submission is under review. Project details and journal entries are read-only until review is complete.</p>
+      ) : null}
       {shipLockReason ? <p className="project-modal__ship-lock">{shipLockReason}</p> : null}
     </ModalShell>
   );
