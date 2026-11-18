@@ -38,6 +38,7 @@ function journalEntryAfterLaunchWhere() {
 export const MIN_SHIP_LOGGED_HOURS = 1;
 const MIN_RESHIP_UPDATE_LENGTH = 80;
 const MAX_RESHIP_UPDATE_LENGTH = 10000;
+const REVIEW_CLAIM_STALE_AFTER_MS = 90_000;
 
 export async function ensureProjectsTable() {
   if (!pool) {
@@ -116,6 +117,11 @@ export async function ensureProjectsTable() {
     ship_kind: "TEXT NOT NULL DEFAULT 'initial'",
     reship_update: "TEXT",
     blocked: "BOOLEAN NOT NULL DEFAULT FALSE",
+    review_escalated_at: "TIMESTAMPTZ",
+    review_escalated_by_user_id: "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+    review_escalation_note: "TEXT",
+    review_escalation_resolved_at: "TIMESTAMPTZ",
+    review_escalation_resolved_by_user_id: "INTEGER REFERENCES users(id) ON DELETE SET NULL",
     created_at: "TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     updated_at: "TIMESTAMPTZ NOT NULL DEFAULT NOW()",
   };
@@ -225,7 +231,33 @@ export async function ensureProjectsTable() {
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_journal_entries_user_project ON journal_entries(user_id, project_id)`);
   await ensureProjectReviewFeedbackTable();
+  await ensureProjectReviewWorkflowTables();
   await ensureYswsProjectSubmissionsTable();
+}
+
+async function ensureProjectReviewWorkflowTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_review_claims (
+      project_id BIGINT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+      reviewer_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_review_events (
+      id BIGSERIAL PRIMARY KEY,
+      project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      event_type TEXT NOT NULL,
+      previous_reviewer_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      reviewer_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_project_review_events_project ON project_review_events(project_id, created_at DESC, id DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_projects_open_review_escalations ON projects(review_escalated_at) WHERE review_escalated_at IS NOT NULL AND review_escalation_resolved_at IS NULL`);
 }
 
 async function ensureProjectReviewFeedbackTable() {
@@ -289,6 +321,305 @@ async function backfillProjectReviewFeedbackFromProjects() {
   `);
 }
 
+function reviewClaimIsStale(heartbeatAt) {
+  const heartbeat = heartbeatAt instanceof Date ? heartbeatAt : new Date(heartbeatAt || 0);
+  return !Number.isFinite(heartbeat.getTime()) || Date.now() - heartbeat.getTime() > REVIEW_CLAIM_STALE_AFTER_MS;
+}
+
+function toProjectReviewClaim(row, viewerId = null) {
+  if (!row?.project_id || !row.reviewer_user_id) return null;
+  return {
+    reviewerUserId: Number(row.reviewer_user_id),
+    reviewerName: row.reviewer_name || row.reviewer_email || "Reviewer",
+    claimedAt: row.claimed_at,
+    heartbeatAt: row.heartbeat_at,
+    isMine: viewerId != null && Number(row.reviewer_user_id) === Number(viewerId),
+    isStale: reviewClaimIsStale(row.heartbeat_at),
+  };
+}
+
+async function loadProjectReviewClaims(projectIds, viewerId = null) {
+  if (!pool || !projectIds.length) return new Map();
+  const result = await pool.query(
+    `
+      SELECT c.*, u.name AS reviewer_name, u.email AS reviewer_email
+      FROM project_review_claims c
+      LEFT JOIN users u ON u.id = c.reviewer_user_id
+      WHERE c.project_id = ANY($1::bigint[])
+    `,
+    [projectIds]
+  );
+  return new Map(result.rows.map((row) => [Number(row.project_id), toProjectReviewClaim(row, viewerId)]));
+}
+
+async function attachProjectReviewClaims(projects, viewerId = null) {
+  const claimMap = await loadProjectReviewClaims(projects.map((project) => project.id), viewerId);
+  return projects.map((project) => ({ ...project, claim: claimMap.get(Number(project.id)) || null }));
+}
+
+async function attachProjectReviewEvents(projects) {
+  if (!pool || !projects.length) return projects.map((project) => ({ ...project, reviewEvents: [] }));
+  const result = await pool.query(
+    `
+      SELECT
+        e.*,
+        actor.name AS actor_name,
+        actor.email AS actor_email,
+        previous_reviewer.name AS previous_reviewer_name,
+        previous_reviewer.email AS previous_reviewer_email,
+        reviewer.name AS reviewer_name,
+        reviewer.email AS reviewer_email
+      FROM project_review_events e
+      LEFT JOIN users actor ON actor.id = e.actor_user_id
+      LEFT JOIN users previous_reviewer ON previous_reviewer.id = e.previous_reviewer_user_id
+      LEFT JOIN users reviewer ON reviewer.id = e.reviewer_user_id
+      WHERE e.project_id = ANY($1::bigint[])
+      ORDER BY e.created_at DESC, e.id DESC
+    `,
+    [projects.map((project) => project.id)]
+  );
+  const eventsByProject = new Map();
+  for (const row of result.rows) {
+    const projectId = Number(row.project_id);
+    if (!eventsByProject.has(projectId)) eventsByProject.set(projectId, []);
+    eventsByProject.get(projectId).push({
+      id: Number(row.id),
+      type: row.event_type,
+      actorUserId: row.actor_user_id == null ? null : Number(row.actor_user_id),
+      actorName: row.actor_name || row.actor_email || "Former reviewer",
+      previousReviewerName: row.previous_reviewer_name || row.previous_reviewer_email || null,
+      reviewerName: row.reviewer_name || row.reviewer_email || null,
+      note: row.note,
+      createdAt: row.created_at,
+    });
+  }
+  return projects.map((project) => ({
+    ...project,
+    reviewEvents: eventsByProject.get(Number(project.id)) || [],
+  }));
+}
+
+async function getProjectReviewClaim(client, projectId) {
+  const result = await client.query(
+    `
+      SELECT c.*, u.name AS reviewer_name, u.email AS reviewer_email
+      FROM project_review_claims c
+      LEFT JOIN users u ON u.id = c.reviewer_user_id
+      WHERE c.project_id = $1
+      FOR UPDATE OF c
+    `,
+    [projectId]
+  );
+  return result.rows[0] || null;
+}
+
+async function recordProjectReviewEvent(client, { projectId, actorUserId, eventType, previousReviewerUserId = null, reviewerUserId = null, note = null }) {
+  await client.query(
+    `
+      INSERT INTO project_review_events (
+        project_id, actor_user_id, event_type, previous_reviewer_user_id, reviewer_user_id, note
+      ) VALUES ($1, $2, $3, $4, $5, $6)
+    `,
+    [projectId, actorUserId ?? null, eventType, previousReviewerUserId, reviewerUserId, textOrNull(note)]
+  );
+}
+
+async function assertActiveProjectReviewClaim(client, projectId, reviewerId) {
+  const claim = await getProjectReviewClaim(client, projectId);
+  if (!claim || Number(claim.reviewer_user_id) !== Number(reviewerId) || reviewClaimIsStale(claim.heartbeat_at)) {
+    const error = new Error("Claim this review before submitting a decision. Another reviewer may currently own it.");
+    error.statusCode = 409;
+    error.code = "REVIEW_CLAIM_REQUIRED";
+    throw error;
+  }
+  return claim;
+}
+
+async function releaseProjectReviewClaim(client, projectId, reviewerId, note = null) {
+  const claim = await getProjectReviewClaim(client, projectId);
+  if (!claim || Number(claim.reviewer_user_id) !== Number(reviewerId)) return;
+  await client.query(`DELETE FROM project_review_claims WHERE project_id = $1`, [projectId]);
+  await recordProjectReviewEvent(client, {
+    projectId,
+    actorUserId: reviewerId,
+    eventType: "claim_released",
+    previousReviewerUserId: reviewerId,
+    note,
+  });
+}
+
+export async function claimProjectForReview(reviewerId, projectId, { force = false, canHandleEscalation = false } = {}) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const projectResult = await client.query(`SELECT * FROM projects WHERE id = $1 FOR UPDATE`, [projectId]);
+    const project = projectResult.rows[0];
+    if (!project) throw new Error("Project not found.");
+    if (!project.shipped || !isPendingReviewProject(toPublicProject(project))) throw new Error("Project is not in the review queue.");
+    const escalationPending = project.review_escalated_at && !project.review_escalation_resolved_at;
+    if (escalationPending && !canHandleEscalation) {
+      const error = new Error("This review was escalated for an admin decision.");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const existing = await getProjectReviewClaim(client, projectId);
+    const activeOtherClaim =
+      existing?.reviewer_user_id &&
+      Number(existing.reviewer_user_id) !== Number(reviewerId) &&
+      !reviewClaimIsStale(existing.heartbeat_at);
+    if (activeOtherClaim && !force) {
+      await client.query("COMMIT");
+      return { claimed: false, claim: toProjectReviewClaim(existing, reviewerId) };
+    }
+
+    const previousReviewerUserId = existing?.reviewer_user_id ? Number(existing.reviewer_user_id) : null;
+    await client.query(
+      `
+        INSERT INTO project_review_claims (project_id, reviewer_user_id, claimed_at, heartbeat_at)
+        VALUES ($1, $2, NOW(), NOW())
+        ON CONFLICT (project_id) DO UPDATE SET
+          reviewer_user_id = EXCLUDED.reviewer_user_id,
+          claimed_at = CASE
+            WHEN project_review_claims.reviewer_user_id = EXCLUDED.reviewer_user_id
+              THEN project_review_claims.claimed_at
+            ELSE NOW()
+          END,
+          heartbeat_at = NOW()
+      `,
+      [projectId, reviewerId]
+    );
+    if (previousReviewerUserId !== Number(reviewerId)) {
+      await recordProjectReviewEvent(client, {
+        projectId,
+        actorUserId: reviewerId,
+        eventType: previousReviewerUserId ? "claim_reassigned" : "claim_acquired",
+        previousReviewerUserId,
+        reviewerUserId: reviewerId,
+        note: previousReviewerUserId ? "Review claim taken over." : null,
+      });
+    }
+    const updated = await getProjectReviewClaim(client, projectId);
+    await client.query("COMMIT");
+    return { claimed: true, claim: toProjectReviewClaim(updated, reviewerId) };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function heartbeatProjectReviewClaim(reviewerId, projectId) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+  const result = await pool.query(
+    `
+      UPDATE project_review_claims c
+      SET heartbeat_at = NOW()
+      FROM projects p
+      WHERE c.project_id = $1
+        AND c.reviewer_user_id = $2
+        AND p.id = c.project_id
+        AND p.shipped IS TRUE
+        AND p.reviewed IS NOT TRUE
+      RETURNING c.project_id, c.reviewer_user_id, c.claimed_at, c.heartbeat_at
+    `,
+    [projectId, reviewerId]
+  );
+  return { claimed: result.rowCount > 0 };
+}
+
+export async function releaseProjectReviewClaimForReviewer(reviewerId, projectId) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const claim = await getProjectReviewClaim(client, projectId);
+    if (!claim || Number(claim.reviewer_user_id) !== Number(reviewerId)) {
+      await client.query("COMMIT");
+      return { released: false };
+    }
+    await releaseProjectReviewClaim(client, projectId, reviewerId);
+    await client.query("COMMIT");
+    return { released: true };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function escalateProjectReview(reviewerId, projectId, input = {}) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+  const note = textOrNull(input.note);
+  if (!note) throw new Error("Add a reason so the admin can understand why this review needs escalation.");
+  if (note.length > 2000) throw new Error("Escalation reason must be 2,000 characters or fewer.");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(`SELECT * FROM projects WHERE id = $1 FOR UPDATE`, [projectId]);
+    const project = result.rows[0];
+    if (!project) throw new Error("Project not found.");
+    if (!project.shipped || !isPendingReviewProject(toPublicProject(project))) throw new Error("Project is not in the review queue.");
+    await assertActiveProjectReviewClaim(client, projectId, reviewerId);
+
+    await client.query(
+      `
+        UPDATE projects
+        SET review_escalated_at = NOW(),
+            review_escalated_by_user_id = $2,
+            review_escalation_note = $3,
+            review_escalation_resolved_at = NULL,
+            review_escalation_resolved_by_user_id = NULL,
+            updated_at = NOW()
+        WHERE id = $1
+      `,
+      [projectId, reviewerId, note]
+    );
+    await releaseProjectReviewClaim(client, projectId, reviewerId, "Reviewer sent this to the admin escalation queue.");
+    await recordProjectReviewEvent(client, {
+      projectId,
+      actorUserId: reviewerId,
+      eventType: "escalation_requested",
+      note,
+    });
+    await client.query("COMMIT");
+    return { escalated: true };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function resolveProjectReviewEscalation(client, projectId, reviewerId) {
+  const result = await client.query(
+    `
+      UPDATE projects
+      SET review_escalation_resolved_at = NOW(),
+          review_escalation_resolved_by_user_id = $2,
+          updated_at = NOW()
+      WHERE id = $1
+        AND review_escalated_at IS NOT NULL
+        AND review_escalation_resolved_at IS NULL
+      RETURNING review_escalation_note
+    `,
+    [projectId, reviewerId]
+  );
+  if (result.rows[0]) {
+    await recordProjectReviewEvent(client, {
+      projectId,
+      actorUserId: reviewerId,
+      eventType: "escalation_resolved",
+      note: "The admin review decision resolved this escalation.",
+    });
+  }
+}
+
 async function recordProjectReviewFeedback(client, input = {}) {
   const feedback = textOrNull(input.feedback);
   const hoursValue = input.hours;
@@ -332,10 +663,11 @@ async function loadReviewFeedbackMapForProjectIds(projectIds) {
 
   const result = await pool.query(
     `
-      SELECT *
+      SELECT project_review_feedback.*, reviewer.name AS reviewer_name, reviewer.email AS reviewer_email
       FROM project_review_feedback
-      WHERE project_id = ANY($1::bigint[])
-      ORDER BY created_at DESC, id DESC
+      LEFT JOIN users reviewer ON reviewer.id = project_review_feedback.reviewer_user_id
+      WHERE project_review_feedback.project_id = ANY($1::bigint[])
+      ORDER BY project_review_feedback.created_at DESC, project_review_feedback.id DESC
     `,
     [projectIds]
   );
@@ -369,7 +701,14 @@ function toUserFacingReviewFeedback(record) {
       createdAt: record.createdAt,
     };
   }
-  return record;
+  return {
+    id: record.id,
+    outcome: record.outcome,
+    feedback: record.feedback,
+    hours: record.hours,
+    reductionHours: record.reductionHours,
+    createdAt: record.createdAt,
+  };
 }
 
 async function toPublicProjectForUser(row) {
@@ -642,7 +981,7 @@ export async function shipProjectForUser(userId, projectId, { reshipUpdate } = {
 
 export { buildDefaultJustificationTemplate } from "./hourJustification.js";
 
-export async function listAdminReviewProjects({ shipSort = "oldest" } = {}) {
+export async function listAdminReviewProjects({ shipSort = "oldest", viewerId = null, includeEscalated = false } = {}) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const direction = shipSort === "newest" ? "DESC" : "ASC";
@@ -675,15 +1014,18 @@ export async function listAdminReviewProjects({ shipSort = "oldest" } = {}) {
     )
   );
 
-  const projects = result.rows.map(toAdminReviewProject);
+  const projects = await attachProjectReviewClaims(result.rows.map(toAdminReviewProject), viewerId);
   const pendingProjects = projects.filter(isPendingReviewProject);
   return {
     projects: projects.filter((project) => !isPendingReviewProject(project)),
     pendingProjects,
+    escalatedProjects: includeEscalated
+      ? pendingProjects.filter((project) => project.reviewEscalatedAt && !project.reviewEscalationResolvedAt)
+      : undefined,
   };
 }
 
-export async function getAdminReviewProject(projectId) {
+export async function getAdminReviewProject(projectId, viewerId = null) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const ownerResult = await pool.query(`SELECT user_id FROM projects WHERE id = $1`, [projectId]);
@@ -719,8 +1061,10 @@ export async function getAdminReviewProject(projectId) {
   if (!project) return null;
 
   const [projectWithFeedback] = await attachReviewFeedbackToProjects([project]);
-  const journalEntries = await listJournalEntriesForUserProject(projectWithFeedback.userId, projectWithFeedback.id);
-  return { project: projectWithFeedback, journalEntries };
+  const [projectWithClaim] = await attachProjectReviewClaims([projectWithFeedback], viewerId);
+  const [projectWithWorkflow] = await attachProjectReviewEvents([projectWithClaim]);
+  const journalEntries = await listJournalEntriesForUserProject(projectWithWorkflow.userId, projectWithWorkflow.id);
+  return { project: projectWithWorkflow, journalEntries };
 }
 
 export async function approveAdminReviewProject(adminId, projectId, input = {}) {
@@ -755,6 +1099,7 @@ export async function approveAdminReviewProject(adminId, projectId, input = {}) 
     if (!project) throw new Error("Project not found.");
     if (!project.shipped) throw new Error("Project is not in the review queue.");
     if (project.reviewed && project.status === "approved") throw new Error("Project is already approved.");
+    await assertActiveProjectReviewClaim(client, projectId, adminId);
 
     const bankedHours = approvedBankedHours(project);
     const totalLoggedHours = loggedHours(project);
@@ -830,6 +1175,8 @@ export async function approveAdminReviewProject(adminId, projectId, input = {}) 
       hours: approvedHours,
       reductionHours,
     });
+    await resolveProjectReviewEscalation(client, projectId, adminId);
+    await releaseProjectReviewClaim(client, projectId, adminId, "Review decision submitted.");
     await client.query("COMMIT");
 
     await insertNotification(
@@ -882,6 +1229,9 @@ async function finalizeAdminReviewRemoval(adminId, projectId, input = {}, { cons
 
     const lookup = await client.query("SELECT * FROM projects WHERE id = $1 FOR UPDATE", [projectId]);
     const project = lookup.rows[0];
+    if (!project) throw new Error("Project not found.");
+    if (!project.shipped) throw new Error("Project is not in the review queue.");
+    await assertActiveProjectReviewClaim(client, projectId, adminId);
     const isReship = project?.ship_kind === "reship";
     const submissionHours = project ? pendingReviewHours(project) : 0;
     const rejectionStatus = isReship ? "reship-rejected" : "rejected";
@@ -926,6 +1276,8 @@ async function finalizeAdminReviewRemoval(adminId, projectId, input = {}, { cons
       feedback,
       hours: submissionHours,
     });
+    await resolveProjectReviewEscalation(client, projectId, adminId);
+    await releaseProjectReviewClaim(client, projectId, adminId, "Review decision submitted.");
 
     await client.query("COMMIT");
 
@@ -959,52 +1311,63 @@ export async function blockAdminReviewProject(adminId, projectId, input = {}) {
     throw new Error("Blocking requires a written reason.");
   }
 
-  const lookup = await pool.query("SELECT * FROM projects WHERE id = $1", [projectId]);
-  const project = lookup.rows[0];
-  if (!project) throw new Error("Project not found.");
-  const submissionHours = loggedHours(project);
+  const client = await pool.connect();
+  let row;
+  let parentProjectId = null;
+  try {
+    await client.query("BEGIN");
+    const lookup = await client.query("SELECT * FROM projects WHERE id = $1 FOR UPDATE", [projectId]);
+    const project = lookup.rows[0];
+    if (!project) throw new Error("Project not found.");
+    const isPendingReview = isPendingReviewProject(toPublicProject(project));
+    if (isPendingReview) await assertActiveProjectReviewClaim(client, projectId, adminId);
+    const submissionHours = loggedHours(project);
 
-  const result = await pool.query(
-    `
-      UPDATE projects
-      SET
-        shipped = FALSE,
-        shipped_at = NULL,
-        reviewed = TRUE,
-        reviewed_at = NOW(),
-        reviewed_by_user_id = $1,
-        status = 'blocked',
-        blocked = TRUE,
-        admin_feedback = $2,
-        updated_at = NOW()
-      WHERE id = $3
-      RETURNING *, total_hours AS journal_hours
-    `,
-    [adminId, feedback, projectId]
-  );
-
-  if (!result.rows[0]) {
-    throw new Error("Project not found.");
-  }
-
-  const row = result.rows[0];
-  if (row.parent_project_id) {
-    await pool.query(
-      `UPDATE projects SET blocked = TRUE, updated_at = NOW() WHERE id = $1`,
-      [row.parent_project_id]
+    const result = await client.query(
+      `
+        UPDATE projects
+        SET
+          shipped = FALSE,
+          shipped_at = NULL,
+          reviewed = TRUE,
+          reviewed_at = NOW(),
+          reviewed_by_user_id = $1,
+          status = 'blocked',
+          blocked = TRUE,
+          admin_feedback = $2,
+          updated_at = NOW()
+        WHERE id = $3
+        RETURNING *, total_hours AS journal_hours
+      `,
+      [adminId, feedback, projectId]
     );
-    await trySyncProjectToAirtable(row.parent_project_id);
+    row = result.rows[0];
+    if (!row) throw new Error("Project not found.");
+    parentProjectId = row.parent_project_id || null;
+    if (parentProjectId) {
+      await client.query(`UPDATE projects SET blocked = TRUE, updated_at = NOW() WHERE id = $1`, [parentProjectId]);
+    }
+    await recordProjectReviewFeedback(client, {
+      projectId,
+      userId: project.user_id,
+      reviewerUserId: adminId,
+      outcome: "blocked",
+      feedback,
+      hours: submissionHours,
+    });
+    if (isPendingReview) {
+      await resolveProjectReviewEscalation(client, projectId, adminId);
+      await releaseProjectReviewClaim(client, projectId, adminId, "Review decision submitted.");
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
 
-  await recordProjectReviewFeedback(pool, {
-    projectId,
-    userId: project.user_id,
-    reviewerUserId: adminId,
-    outcome: "blocked",
-    feedback,
-    hours: submissionHours,
-  });
-
+  if (parentProjectId) await trySyncProjectToAirtable(parentProjectId);
   await trySyncProjectToAirtable(row.id);
   await trySubmitProjectToYsws(row.id);
   return toPublicProject(row);
@@ -1179,7 +1542,7 @@ export async function rejectParticipantOrderForReview(projectId, orderId) {
   return { order: toReviewParticipantShopOrder(rejectedOrder), ...refreshed };
 }
 
-export async function patchAdminReviewProjectFlags(projectId, input = {}) {
+export async function patchAdminReviewProjectFlags(projectId, input = {}, viewerId = null) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const hasFraud =
@@ -1203,7 +1566,7 @@ export async function patchAdminReviewProjectFlags(projectId, input = {}) {
     throw new Error("Project not found.");
   }
 
-  return getAdminReviewProject(projectId);
+  return getAdminReviewProject(projectId, viewerId);
 }
 
 export async function deleteProjectBySuperadmin(projectId) {
@@ -1953,6 +2316,7 @@ async function trySyncProjectToAirtable(projectId) {
 function toPublicReviewFeedback(row) {
   return {
     id: row.id,
+    reviewerName: row.reviewer_name || row.reviewer_email || null,
     outcome: row.outcome,
     feedback: row.feedback,
     hours: row.hours != null ? Number(row.hours) : null,
@@ -1996,6 +2360,12 @@ function toPublicProject(row) {
     updatedAt: row.updated_at,
     fraudFlag: Boolean(row.fraud_flag),
     blocked: Boolean(row.blocked),
+    reviewEscalatedAt: row.review_escalated_at || null,
+    reviewEscalatedByUserId: row.review_escalated_by_user_id == null ? null : Number(row.review_escalated_by_user_id),
+    reviewEscalationNote: textOrNull(row.review_escalation_note),
+    reviewEscalationResolvedAt: row.review_escalation_resolved_at || null,
+    reviewEscalationResolvedByUserId:
+      row.review_escalation_resolved_by_user_id == null ? null : Number(row.review_escalation_resolved_by_user_id),
     shipKind: row.ship_kind || "initial",
     reshipUpdate: textOrNull(row.reship_update),
     parentProjectId: row.parent_project_id != null ? Number(row.parent_project_id) : null,
