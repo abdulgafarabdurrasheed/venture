@@ -38,6 +38,15 @@ function journalEntryAfterLaunchWhere() {
 export const MIN_SHIP_LOGGED_HOURS = 1;
 const MIN_RESHIP_UPDATE_LENGTH = 80;
 const MAX_RESHIP_UPDATE_LENGTH = 10000;
+const PROJECT_IN_REVIEW_MESSAGE =
+  "This project is submitted for review and cannot be edited until review is complete.";
+
+class ProjectInReviewError extends Error {
+  constructor() {
+    super(PROJECT_IN_REVIEW_MESSAGE);
+    this.name = "ProjectInReviewError";
+  }
+}
 
 export async function ensureProjectsTable() {
   if (!pool) {
@@ -518,41 +527,43 @@ export async function updateProjectForUser(userId, projectId, input) {
 
   const project = normalizeProjectInput(input);
   validateProjectBasics(project);
-  await assertProjectNameAvailable(userId, project.name, projectId);
+  const row = await withWritableProjectForUser(userId, projectId, async (client) => {
+    await assertProjectNameAvailable(userId, project.name, projectId, client);
+    const result = await client.query(
+      `
+        UPDATE projects
+        SET
+          name = $1,
+          description = $2,
+          project_type = $3,
+          playable_url = $4,
+          code_url = $5,
+          image_url = $6,
+          hackatime_names = $7,
+          updated_at = NOW()
+        WHERE id = $8
+          AND user_id = $9
+        RETURNING *
+      `,
+      [
+        project.name,
+        project.description,
+        project.projectType,
+        project.playableUrl,
+        project.codeUrl,
+        project.imageUrl,
+        JSON.stringify(project.hackatimeNames || []),
+        projectId,
+        userId,
+      ]
+    );
+    return result.rows[0] || null;
+  });
 
-  const result = await pool.query(
-    `
-      UPDATE projects
-      SET
-        name = $1,
-        description = $2,
-        project_type = $3,
-        playable_url = $4,
-        code_url = $5,
-        image_url = $6,
-        hackatime_names = $7,
-        updated_at = NOW()
-      WHERE id = $8
-        AND user_id = $9
-      RETURNING *
-    `,
-    [
-      project.name,
-      project.description,
-      project.projectType,
-      project.playableUrl,
-      project.codeUrl,
-      project.imageUrl,
-      JSON.stringify(project.hackatimeNames || []),
-      projectId,
-      userId,
-    ]
-  );
-
-  if (!result.rows[0]) return null;
-  await applyHackatimeHoursToProject(userId, result.rows[0].id);
-  await trySyncProjectToAirtable(result.rows[0].id);
-  return toPublicProjectForUser((await getProjectRowForAirtableSync(result.rows[0].id)) || result.rows[0]);
+  if (!row) return null;
+  await applyHackatimeHoursToProject(userId, row.id);
+  await trySyncProjectToAirtable(row.id);
+  return toPublicProjectForUser((await getProjectRowForAirtableSync(row.id)) || row);
 }
 
 export async function shipProjectForUser(userId, projectId, { reshipUpdate } = {}) {
@@ -1377,78 +1388,77 @@ export async function listPublicJournalingProjects() {
 
 export async function updateJournalEntryForUser(userId, projectId, entryId, input = {}) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
-
-  const project = await getProjectRowForUser(userId, projectId);
-  if (!project) {
-    throw new Error("Project not found.");
-  }
-
-  const existingResult = await pool.query(
-    `
-      SELECT journal_entries.*
-      FROM journal_entries
-      WHERE journal_entries.id = $1
-        AND journal_entries.user_id = $2
-        AND journal_entries.project_id = $3
-    `,
-    [entryId, userId, projectId]
-  );
-  const existing = existingResult.rows[0];
-  if (!existing) {
-    throw new Error("Journal entry not found.");
-  }
-  if (!isJournalEntryEditable(project, existing)) {
-    throw new Error("This journal entry cannot be edited because it is part of a shipped submission.");
-  }
-
   const journal = normalizeJournalEntryInput(input);
   assertJournalDescriptionMediaIsCdnOnly(journal.description);
+  const writable = await withWritableProjectForUser(
+    userId,
+    projectId,
+    async (client, lockedProject) => {
+      const existingResult = await client.query(
+        `
+          SELECT journal_entries.*
+          FROM journal_entries
+          WHERE journal_entries.id = $1
+            AND journal_entries.user_id = $2
+            AND journal_entries.project_id = $3
+        `,
+        [entryId, userId, projectId]
+      );
+      const existing = existingResult.rows[0];
+      if (!existing) throw new Error("Journal entry not found.");
+      if (!isJournalEntryEditable(lockedProject, existing)) {
+        throw new Error("This journal entry cannot be edited because it is part of a shipped submission.");
+      }
 
-  const mergedEntry = {
-    time_done: journal.timeDone,
-    created_at: existing.created_at,
-  };
-  if (!isJournalEntryEditable(project, mergedEntry)) {
-    throw new Error("Time done must stay after your last ship date for editable entries.");
-  }
+      const mergedEntry = { time_done: journal.timeDone, created_at: existing.created_at };
+      if (!isJournalEntryEditable(lockedProject, mergedEntry)) {
+        throw new Error("Time done must stay after your last ship date for editable entries.");
+      }
 
-  const result = await pool.query(
-    `
-      UPDATE journal_entries
-      SET
-        time_done = $4,
-        hours_worked = $5,
-        description = $6,
-        tools_used = $7,
-        project_name = $8,
-        project_index = $9,
-        updated_at = NOW()
-      WHERE id = $1
-        AND user_id = $2
-        AND project_id = $3
-      RETURNING *
-    `,
-    [
-      entryId,
-      userId,
-      project.id,
-      journal.timeDone,
-      journal.hoursWorked,
-      journal.description,
-      JSON.stringify(journal.toolsUsed),
-      project.name,
-      project.project_index ?? 0,
-    ]
+      const result = await client.query(
+        `
+          UPDATE journal_entries
+          SET
+            time_done = $4,
+            hours_worked = $5,
+            description = $6,
+            tools_used = $7,
+            project_name = $8,
+            project_index = $9,
+            updated_at = NOW()
+          WHERE id = $1
+            AND user_id = $2
+            AND project_id = $3
+          RETURNING *
+        `,
+        [
+          entryId,
+          userId,
+          lockedProject.id,
+          journal.timeDone,
+          journal.hoursWorked,
+          journal.description,
+          JSON.stringify(journal.toolsUsed),
+          lockedProject.name,
+          lockedProject.project_index ?? 0,
+        ]
+      );
+      await refreshProjectJournalHoursWithClient(client, lockedProject.id);
+      return { project: lockedProject, entry: result.rows[0] };
+    }
   );
+  if (!writable) throw new Error("Project not found.");
+  const { project, entry } = writable;
 
-  const updatedProject = await refreshProjectJournalHours(userId, project.id);
+  await trySyncProjectToAirtable(project.id);
+  const updatedProject = await toPublicProjectForUser(await getProjectRowForAirtableSync(project.id));
 
-  syncJournalEntryToAirtable(result.rows[0]).catch((err) => {
+  syncJournalEntryToAirtable(entry).catch((err) => {
     console.error("[airtable] Failed to sync journal entry:", err.message);
   });
 
   return {
-    entry: toPublicJournalEntry(result.rows[0], project),
+    entry: toPublicJournalEntry(entry, project),
     project: updatedProject,
   };
 }
@@ -1457,47 +1467,53 @@ export async function createJournalEntryForUser(userId, input = {}) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const projectId = input.projectId ?? input.project_id;
-  const project = await getProjectRowForUser(userId, projectId);
-  if (!project) {
-    throw new Error("Project not found.");
-  }
-
   const journal = normalizeJournalEntryInput(input);
   assertJournalDescriptionMediaIsCdnOnly(journal.description);
-  const result = await pool.query(
-    `
-      INSERT INTO journal_entries (
-        user_id,
-        project_id,
-        project_name,
-        project_index,
-        time_done,
-        hours_worked,
-        description,
-        tools_used
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *
-    `,
-    [
-      userId,
-      project.id,
-      project.name,
-      project.project_index ?? 0,
-      journal.timeDone,
-      journal.hoursWorked,
-      journal.description,
-      JSON.stringify(journal.toolsUsed),
-    ]
+  const writable = await withWritableProjectForUser(
+    userId,
+    projectId,
+    async (client, lockedProject) => {
+      const result = await client.query(
+        `
+          INSERT INTO journal_entries (
+            user_id,
+            project_id,
+            project_name,
+            project_index,
+            time_done,
+            hours_worked,
+            description,
+            tools_used
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          RETURNING *
+        `,
+        [
+          userId,
+          lockedProject.id,
+          lockedProject.name,
+          lockedProject.project_index ?? 0,
+          journal.timeDone,
+          journal.hoursWorked,
+          journal.description,
+          JSON.stringify(journal.toolsUsed),
+        ]
+      );
+      await refreshProjectJournalHoursWithClient(client, lockedProject.id);
+      return { project: lockedProject, entry: result.rows[0] };
+    }
   );
+  if (!writable) throw new Error("Project not found.");
+  const { project, entry } = writable;
 
-  const updatedProject = await refreshProjectJournalHours(userId, project.id);
+  await trySyncProjectToAirtable(project.id);
+  const updatedProject = await toPublicProjectForUser(await getProjectRowForAirtableSync(project.id));
 
-  syncJournalEntryToAirtable(result.rows[0]).catch((err) => {
+  syncJournalEntryToAirtable(entry).catch((err) => {
     console.error("[airtable] Failed to sync journal entry:", err.message);
   });
 
   return {
-    entry: toPublicJournalEntry(result.rows[0], project),
+    entry: toPublicJournalEntry(entry, project),
     project: updatedProject,
   };
 }
@@ -1619,6 +1635,14 @@ export async function refreshJournalHoursForAllUserProjects(userId) {
         ), 0),
         updated_at = NOW()
       WHERE projects.user_id = $1
+        AND NOT (
+          projects.reviewed IS FALSE
+          AND (
+            (projects.status = 'in-review' AND projects.shipped IS TRUE)
+            OR projects.status = 'pending-reship'
+            OR (projects.shipped IS TRUE AND projects.ship_kind = 'reship')
+          )
+        )
       RETURNING id
     `,
     [userId]
@@ -1641,15 +1665,28 @@ export async function refreshProjectHackatimeHoursForUser(userId, hackatimeProje
 
   const list = hackatimeProjects || (await fetchHackatimeProjectsForStack(token));
   const projectsResult = await pool.query(
-    `SELECT id, hackatime_names FROM projects WHERE user_id = $1`,
+    `SELECT id, hackatime_names, status, shipped, reviewed, ship_kind FROM projects WHERE user_id = $1`,
     [userId]
   );
 
   for (const project of projectsResult.rows) {
+    if (isPendingReviewProject(project)) continue;
     const names = parseHackatimeNames(project.hackatime_names);
     const hours = sumHackatimeHoursForNames(list, names);
     await pool.query(
-      `UPDATE projects SET hackatime_hours = $1, updated_at = NOW() WHERE id = $2`,
+      `
+        UPDATE projects
+        SET hackatime_hours = $1, updated_at = NOW()
+        WHERE id = $2
+          AND NOT (
+            reviewed IS FALSE
+            AND (
+              (status = 'in-review' AND shipped IS TRUE)
+              OR status = 'pending-reship'
+              OR (shipped IS TRUE AND ship_kind = 'reship')
+            )
+          )
+      `,
       [hours, project.id]
     );
     await trySyncProjectToAirtable(project.id);
@@ -1671,16 +1708,30 @@ async function applyHackatimeHoursToProject(userId, projectId) {
   if (!token) return;
 
   const projectResult = await pool.query(
-    `SELECT hackatime_names FROM projects WHERE id = $1 AND user_id = $2`,
+    `SELECT hackatime_names, status, shipped, reviewed, ship_kind FROM projects WHERE id = $1 AND user_id = $2`,
     [projectId, userId]
   );
+  if (isPendingReviewProject(projectResult.rows[0] || {})) return;
   const names = parseHackatimeNames(projectResult.rows[0]?.hackatime_names);
   const list = await fetchHackatimeProjectsForStack(token);
   const hours = sumHackatimeHoursForNames(list, names);
 
   await pool.query(
-    `UPDATE projects SET hackatime_hours = $1, updated_at = NOW() WHERE id = $2`,
-    [hours, projectId]
+    `
+      UPDATE projects
+      SET hackatime_hours = $1, updated_at = NOW()
+      WHERE id = $2
+        AND user_id = $3
+        AND NOT (
+          reviewed IS FALSE
+          AND (
+            (status = 'in-review' AND shipped IS TRUE)
+            OR status = 'pending-reship'
+            OR (shipped IS TRUE AND ship_kind = 'reship')
+          )
+        )
+    `,
+    [hours, projectId, userId]
   );
 }
 
@@ -1699,8 +1750,8 @@ function validateProjectBasics(project) {
   if (!project.projectType) throw new Error("Project type is required.");
 }
 
-async function assertProjectNameAvailable(userId, projectName, exceptProjectId = null) {
-  const result = await pool.query(
+async function assertProjectNameAvailable(userId, projectName, exceptProjectId = null, queryable = pool) {
+  const result = await queryable.query(
     `
       SELECT id
       FROM projects
@@ -1714,6 +1765,43 @@ async function assertProjectNameAvailable(userId, projectName, exceptProjectId =
 
   if (result.rows.length > 0) {
     throw new Error("You already have a project with that name.");
+  }
+}
+
+async function withWritableProjectForUser(userId, projectId, write) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `
+        SELECT projects.*, project_order.project_index
+        FROM projects
+        JOIN (
+          SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC, id DESC) - 1 AS project_index
+          FROM projects
+          WHERE user_id = $1
+        ) project_order ON project_order.id = projects.id
+        WHERE projects.user_id = $1
+          AND projects.id = $2
+        FOR UPDATE OF projects
+      `,
+      [userId, projectId]
+    );
+    const project = result.rows[0];
+    if (!project) {
+      await client.query("COMMIT");
+      return null;
+    }
+    if (isPendingReviewProject(project)) throw new ProjectInReviewError();
+
+    const value = await write(client, project);
+    await client.query("COMMIT");
+    return value;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -1769,6 +1857,14 @@ async function refreshProjectJournalHours(userId, projectId) {
         updated_at = NOW()
       WHERE user_id = $1
         AND id = $2
+        AND NOT (
+          reviewed IS FALSE
+          AND (
+            (status = 'in-review' AND shipped IS TRUE)
+            OR status = 'pending-reship'
+            OR (shipped IS TRUE AND ship_kind = 'reship')
+          )
+        )
       RETURNING *, total_hours AS journal_hours
     `,
     [userId, projectId]
@@ -2024,7 +2120,7 @@ function isPendingReviewProject(project) {
   if (status === "in-review" && project.shipped) return true;
   if (status === "pending-reship") return true;
 
-  return project.shipped && project.shipKind === "reship";
+  return project.shipped && (project.shipKind ?? project.ship_kind) === "reship";
 }
 
 function journalEntryTimestamp(row) {

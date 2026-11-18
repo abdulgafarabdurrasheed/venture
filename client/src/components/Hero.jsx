@@ -73,10 +73,10 @@ const FAQ_ITEMS = [
     ),
   },
   {
-    question: "When will Venture end?",
+    question: "When does project shipping close?",
     answer: (
       <>
-        Venture runs from <strong>June 15 to July 15</strong>. Dates are subject to change.
+        Project shipping is open indefinitely for now. We&apos;ll update this page if a close date is set.
       </>
     ),
   },
@@ -148,8 +148,8 @@ export function Hero() {
         <div className="hero__main">
           <div className="hero__title-wrap">
             <img className="hero__title" src={titleImg} width={1011} height={560} alt="Venture" />
-            <p className="hero__dates" aria-label="Program dates">
-              June 15th - July 15th
+            <p className="hero__dates" aria-label="Project shipping status">
+              Project shipping is open indefinitely
             </p>
           </div>
 

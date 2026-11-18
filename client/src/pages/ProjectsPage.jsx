@@ -18,6 +18,7 @@ import {
   fromDatetimeLocalValue,
   getShipLockReason,
   getReshipUpdateValidationError,
+  isProjectUnderReview,
   isReshipEligibleProject,
   journalEntryToForm,
   throwShipConfetti,
@@ -184,6 +185,10 @@ export function ProjectsPage() {
   }
 
   function openEditProject(project) {
+    if (isProjectUnderReview(project)) {
+      setError("This project is submitted for review and cannot be edited until review is complete.");
+      return;
+    }
     setSelectedProject(null);
     setEditingProject({ ...project, hackatimeNames: project.hackatimeNames || [] });
     setError("");
@@ -414,6 +419,7 @@ export function ProjectsPage() {
       {journalProject ? (
         <JournalModal
           project={journalProject}
+          readOnly={isProjectUnderReview(journalProject)}
           entries={journalEntries}
           form={journalForm}
           editingEntryId={editingJournalEntryId}

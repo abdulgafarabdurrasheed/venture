@@ -1,4 +1,4 @@
-import { formatCoins, formatUsd } from "../constants/coinRates.js";
+import { formatUsd } from "../constants/coinRates.js";
 import "./ShopOrderRow.css";
 
 const STATUS_LABELS = {
@@ -16,7 +16,7 @@ export function ShopOrderRow({ order }) {
       <div className="shop-order-row__details">
         <p className="shop-order-row__name">{order.itemName || "Item"}</p>
         <p className="shop-order-row__qty">
-          {order.totalUsd != null ? formatUsd(order.totalUsd) : "—"} · {formatCoins(order.totalCoins ?? 0)} coins
+          {order.totalUsd != null ? formatUsd(order.totalUsd) : "—"}
         </p>
       </div>
       <div className="shop-order-row__status">{label}</div>

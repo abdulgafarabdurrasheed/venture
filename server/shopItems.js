@@ -1,5 +1,4 @@
 import { persistOrderAirtableRecordId, syncShopOrderToAirtable } from "./airtableOrders.js";
-import { MIN_PURCHASE_USD, usdToCoins } from "./coinRates.js";
 import { pool } from "./db.js";
 import { normalizeShopLabelColor, shopLabelColorHex } from "./shopLabelColors.js";
 
@@ -21,6 +20,7 @@ const SHOP_ITEM_COLUMNS = [
   "frame_label",
   "frame_label_color",
   "required_stars",
+  "deleted_at",
 ];
 
 const REMOVED_SHOP_ITEM_COLUMNS = [
@@ -56,7 +56,8 @@ export async function ensureShopItemsTable() {
       discount_percent NUMERIC(5, 2),
       airtable_id VARCHAR,
       synced_at DATE,
-      required_stars INTEGER NOT NULL DEFAULT 0
+      required_stars INTEGER NOT NULL DEFAULT 0,
+      deleted_at TIMESTAMPTZ
     )
   `);
 
@@ -74,7 +75,7 @@ export async function ensureShopItemsTable() {
     CREATE TABLE IF NOT EXISTS shop_orders (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      item_id BIGINT NOT NULL REFERENCES shop_items(id) ON DELETE CASCADE,
+      item_id BIGINT NOT NULL REFERENCES shop_items(id) ON DELETE RESTRICT,
       quantity INTEGER NOT NULL DEFAULT 1,
       total_coins NUMERIC(10, 2) NOT NULL,
       fulfilled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -112,6 +113,7 @@ export async function ensureShopItemsTable() {
   `);
 
   await migrateLegacyShopOrdersSchema();
+  await ensureShopOrderItemForeignKey();
 
   for (const column of REMOVED_SHOP_ORDER_COLUMNS) {
     await pool.query(`ALTER TABLE shop_orders DROP COLUMN IF EXISTS ${column}`);
@@ -189,6 +191,42 @@ async function migrateLegacyShopOrdersSchema() {
   }
 }
 
+async function ensureShopOrderItemForeignKey() {
+  const constraints = await pool.query(`
+    SELECT constraint_row.conname, constraint_row.confdeltype
+    FROM pg_constraint AS constraint_row
+    JOIN pg_attribute AS item_column
+      ON item_column.attrelid = constraint_row.conrelid
+      AND item_column.attname = 'item_id'
+      AND item_column.attnum = ANY(constraint_row.conkey)
+    WHERE constraint_row.conrelid = 'public.shop_orders'::regclass
+      AND constraint_row.confrelid = 'public.shop_items'::regclass
+      AND constraint_row.contype = 'f'
+  `);
+  const rows = constraints.rows;
+  if (rows.length === 1 && ["a", "r"].includes(rows[0].confdeltype)) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const row of rows) {
+      const quotedName = `"${String(row.conname).replaceAll('"', '""')}"`;
+      await client.query(`ALTER TABLE shop_orders DROP CONSTRAINT ${quotedName}`);
+    }
+    await client.query(`
+      ALTER TABLE shop_orders
+      ADD CONSTRAINT shop_orders_item_id_shop_items_fk
+      FOREIGN KEY (item_id) REFERENCES shop_items(id) ON DELETE RESTRICT NOT VALID
+    `);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function ensureShopItemColumn(column) {
   const columnDefinitions = {
     name: "VARCHAR",
@@ -208,6 +246,7 @@ async function ensureShopItemColumn(column) {
     frame_label: "VARCHAR",
     frame_label_color: "VARCHAR NOT NULL DEFAULT 'green'",
     required_stars: "INTEGER NOT NULL DEFAULT 0",
+    deleted_at: "TIMESTAMPTZ",
   };
 
   await pool.query(`ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS ${column} ${columnDefinitions[column]}`);
@@ -216,9 +255,17 @@ async function ensureShopItemColumn(column) {
 export async function listShopItems({ includeInactive = false } = {}) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
-  const filters = ["TRIM(COALESCE(name, '')) <> ''"];
-  if (!includeInactive) filters.push("active IS TRUE");
-  const where = `WHERE ${filters.join(" AND ")}`;
+  const filters = [];
+  if (!includeInactive) {
+    filters.push(
+      "TRIM(COALESCE(name, '')) <> ''",
+      "active IS TRUE",
+      "deleted_at IS NULL",
+      "COALESCE(price, 0) > 0",
+      "COALESCE(price_usd, 0) > 0"
+    );
+  }
+  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
   const result = await pool.query(`
     SELECT *
     FROM shop_items
@@ -266,7 +313,10 @@ function pickDefinedFields(input = {}) {
 export async function updateShopItem(id, input) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
-  const existingResult = await pool.query("SELECT * FROM shop_items WHERE id = $1", [id]);
+  const existingResult = await pool.query(
+    "SELECT * FROM shop_items WHERE id = $1 AND deleted_at IS NULL",
+    [id]
+  );
   const existing = existingResult.rows[0];
   if (!existing) return null;
 
@@ -305,6 +355,7 @@ export async function updateShopItem(id, input) {
         frame_label_color = $15,
         updated_at = NOW()
       WHERE id = $16
+        AND deleted_at IS NULL
       RETURNING *
     `,
     [...shopItemValues(values), position, values.frameLabel, values.frameLabelColor, id]
@@ -315,13 +366,26 @@ export async function updateShopItem(id, input) {
 
 export async function deleteShopItem(id) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
-  const result = await pool.query("DELETE FROM shop_items WHERE id = $1", [id]);
+  const result = await pool.query(
+    `
+      UPDATE shop_items
+      SET active = FALSE,
+          deleted_at = COALESCE(deleted_at, NOW()),
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING id
+    `,
+    [id]
+  );
   return result.rowCount > 0;
 }
 
 export async function setAllShopItemsActive(active) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
-  await pool.query("UPDATE shop_items SET active = $1, updated_at = NOW()", [Boolean(active)]);
+  await pool.query(
+    "UPDATE shop_items SET active = $1, updated_at = NOW() WHERE deleted_at IS NULL",
+    [Boolean(active)]
+  );
 }
 
 export async function reorderShopItems(orderedIds) {
@@ -373,7 +437,7 @@ export async function reorderShopItems(orderedIds) {
 function normalizeItemUsage(value) {
   const text = textOrNull(value);
   if (!text) {
-    throw new Error("Please describe what you will buy with this grant.");
+    throw new Error("Please describe the specific purchase this grant will cover.");
   }
   if (text.length > 2000) {
     throw new Error("Usage description must be 2000 characters or fewer.");
@@ -383,12 +447,6 @@ function normalizeItemUsage(value) {
 
 export async function purchaseShopItemForUser(userId, itemId, input = {}) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
-
-  const amountUsd = numberOrNull(input.amountUsd ?? input.amount_usd ?? input.usdAmount);
-  const totalCoins = usdToCoins(amountUsd);
-  if (totalCoins === null) {
-    throw new Error(`Minimum purchase is $${MIN_PURCHASE_USD.toFixed(2)}.`);
-  }
 
   const itemUsage = normalizeItemUsage(input.itemUsage ?? input.item_usage);
 
@@ -403,12 +461,19 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
         FROM shop_items
         WHERE id = $1
           AND active IS TRUE
+          AND deleted_at IS NULL
         FOR UPDATE
       `,
       [itemId]
     );
     const item = itemResult.rows[0];
     if (!item) throw new Error("Shop item not found.");
+
+    const amountUsd = numberOrNull(item.price_usd);
+    const totalCoins = numberOrNull(item.price);
+    if (amountUsd === null || amountUsd <= 0 || totalCoins === null || totalCoins <= 0) {
+      throw new Error("This shop offer is not configured with a fixed grant amount and coin cost.");
+    }
 
     const currentUserResult = await client.query("SELECT total_stars, coins FROM users WHERE id = $1", [userId]);
     const user = currentUserResult.rows[0];
@@ -451,7 +516,7 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
       const currentUser = await client.query("SELECT coins FROM users WHERE id = $1", [userId]);
       const availableCoins = Number(currentUser.rows[0]?.coins ?? 0);
       throw new Error(
-        `Not enough coins. You have ${formatCoinAmount(availableCoins)} coins, but this costs ${formatCoinAmount(totalCoins)} (${formatUsdAmount(amountUsd)}).`
+        `Not enough coins to claim this offer. You have ${formatCoinAmount(availableCoins)} coins and this offer costs ${formatCoinAmount(totalCoins)}.`
       );
     }
 
@@ -509,6 +574,12 @@ function normalizeShopItemInput(input = {}) {
   if (!textOrNull(input.name)) {
     throw new Error("Shop item name is required.");
   }
+  if (price === null || price <= 0) {
+    throw new Error("Enter a fixed coin cost greater than zero.");
+  }
+  if (priceUsd === null || priceUsd <= 0) {
+    throw new Error("Enter a fixed grant amount greater than zero.");
+  }
 
   return {
     name: textOrNull(input.name),
@@ -565,23 +636,17 @@ function integerOrNull(value) {
 
 function optionalCoinPriceOrNull(value) {
   if (value === undefined || value === null || value === "") return null;
-  const price = integerOrNull(value);
-  if (price === null || price < 0) {
-    throw new Error("Legacy coin price must be a non-negative amount.");
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) {
+    throw new Error("Coin cost must be a positive whole number.");
   }
-  return price;
+  return number;
 }
 
 function formatCoinAmount(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "0";
   return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2);
-}
-
-function formatUsdAmount(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "$0.00";
-  return `$${numeric.toFixed(2)}`;
 }
 
 function discountPercentOrNull(value) {
@@ -814,6 +879,7 @@ function toPublicShopItem(row) {
     frameLabelColor: normalizeShopLabelColor(row.frame_label_color),
     requiredStars: Number(row.required_stars ?? 0),
     frameLabelHex: shopLabelColorHex(row.frame_label_color),
+    deletedAt: row.deleted_at ?? null,
   };
 }
 

@@ -1,6 +1,5 @@
 import { apiFetch } from "../api/client.js";
 import { useEffect, useState } from "react";
-import { COINS_PER_APPROVED_HOUR, COINS_PER_USD, USD_PER_APPROVED_HOUR } from "../constants/coinRates.js";
 import { CDN_UPLOAD_HELP, isHackClubCdnUrl, normalizeHackClubCdnUrl } from "../utils/cdnLinks.js";
 import { shopItemPayload } from "../utils/shopItemPayload.js";
 import { DEFAULT_SHOP_LABEL_COLOR, SHOP_LABEL_COLORS } from "../constants/shopLabelColors.js";
@@ -8,6 +7,8 @@ import "./AdminShopPage.css";
 
 const emptyForm = {
   name: "",
+  price: "",
+  priceUsd: "",
   frameLabel: "",
   frameLabelColor: DEFAULT_SHOP_LABEL_COLOR,
   discountPercent: "",
@@ -116,7 +117,11 @@ export function AdminShopPage() {
   }
 
   async function deleteItem(item) {
-    if (!window.confirm(`Delete ${item.name || "this item"}?`)) return;
+    if (
+      !window.confirm(
+        `Remove ${item.name || "this item"} from the participant shop? Past orders will stay in history, and admins will retain the item record.`
+      )
+    ) return;
     const response = await apiFetch(`/api/admin/shop/items/${item.id}`, {
       method: "DELETE",
       credentials: "include",
@@ -182,10 +187,9 @@ export function AdminShopPage() {
         <h1>Shop Admin</h1>
 
         <p className="admin-shop-pricing-note">
-          Items have no fixed price. At checkout, participants enter how much they need in dollars. The platform
-          charges coins at ${USD_PER_APPROVED_HOUR}/approved hour ({COINS_PER_APPROVED_HOUR} coins/hour, {COINS_PER_USD}{" "}
-          coins per $1). Use the order controls to set shop display order, and add a frame label for each item shown on
-          the shop card.
+          Shop entries are fixed offers. Set a grant amount and coin cost for each item; participants choose an offer
+          and describe the specific purchase it will cover. Create separate entries for different grant sizes, such as
+          a $50 RAM grant.
         </p>
 
         <div className="admin-shop-orders-link">
@@ -222,7 +226,7 @@ export function AdminShopPage() {
                   checked={showInactive}
                   onChange={(event) => setShowInactive(event.target.checked)}
                 />
-                Show deactivated items
+                Show inactive and deleted items
               </label>
             </div>
           </div>
@@ -234,31 +238,37 @@ export function AdminShopPage() {
                   <th>Order</th>
                   <th>ID</th>
                   <th>Name</th>
+                  <th>Grant amount</th>
+                  <th>Coin cost</th>
                   <th>Frame label</th>
                   <th>Max / person</th>
                   <th>Discount</th>
                   <th>Link</th>
-                  <th>Active</th>
+                  <th>Status</th>
+                  <th>Deleted at</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleItems.length === 0 ? (
                   <tr>
-                    <td colSpan="9">No shop items yet.</td>
+                    <td colSpan="12">No shop items yet.</td>
                   </tr>
                 ) : (
                   visibleItems.map((item) => {
                     const fullIndex = sortedItems.findIndex((entry) => entry.id === item.id);
                     return (
-                    <tr key={item.id} className={item.active ? "" : "is-inactive"}>
+                    <tr
+                      key={item.id}
+                      className={item.deletedAt ? "is-deleted" : item.active ? "" : "is-inactive"}
+                    >
                       <td>
                         <div className="admin-shop-order-controls-cell">
                           <span className="admin-shop-order-index">{Number(item.position ?? 0) + 1}</span>
                           <div className="admin-shop-order-buttons">
                             <button
                               type="button"
-                              disabled={reordering || fullIndex <= 0}
+                              disabled={reordering || Boolean(item.deletedAt) || fullIndex <= 0}
                               onClick={() => moveItem(item.id, -1)}
                               aria-label={`Move ${item.name || "item"} up`}
                             >
@@ -266,7 +276,7 @@ export function AdminShopPage() {
                             </button>
                             <button
                               type="button"
-                              disabled={reordering || fullIndex >= sortedItems.length - 1}
+                              disabled={reordering || Boolean(item.deletedAt) || fullIndex >= sortedItems.length - 1}
                               onClick={() => moveItem(item.id, 1)}
                               aria-label={`Move ${item.name || "item"} down`}
                             >
@@ -277,21 +287,32 @@ export function AdminShopPage() {
                       </td>
                       <td>{item.id}</td>
                       <td>{item.name || "—"}</td>
+                      <td>{item.priceUsd ? `$${Number(item.priceUsd).toFixed(2)}` : "Not set"}</td>
+                      <td>{item.price ?? "Not set"}</td>
                       <td>{item.frameLabel || "—"}</td>
                       <td>{item.maxPerPerson ?? "None"}</td>
                       <td>{item.discountPercent ? `${item.discountPercent}% off` : "—"}</td>
                       <td>{item.itemLink ? <a href={item.itemLink} target="_blank" rel="noreferrer">View</a> : "—"}</td>
-                      <td>{item.active ? "Yes" : "No"}</td>
+                      <td>
+                        {item.deletedAt
+                          ? "Deleted"
+                          : !item.price || !item.priceUsd
+                            ? "Needs fixed price"
+                            : item.active
+                              ? "Active"
+                              : "Inactive"}
+                      </td>
+                      <td>{item.deletedAt ? new Date(item.deletedAt).toLocaleString() : "—"}</td>
                       <td>
                         <div className="admin-shop-row-actions">
-                          <button type="button" onClick={() => setEditingItem(item)}>
+                          <button type="button" disabled={Boolean(item.deletedAt)} onClick={() => setEditingItem(item)}>
                             Modify
                           </button>
-                          <button type="button" onClick={() => toggleItem(item)}>
-                            {item.active ? "Deactivate" : "Activate"}
+                          <button type="button" disabled={Boolean(item.deletedAt)} onClick={() => toggleItem(item)}>
+                            {item.deletedAt ? "Deleted" : item.active ? "Deactivate" : "Activate"}
                           </button>
-                          <button type="button" onClick={() => deleteItem(item)}>
-                            Delete
+                          <button type="button" disabled={Boolean(item.deletedAt)} onClick={() => deleteItem(item)}>
+                            {item.deletedAt ? "Retained" : "Delete"}
                           </button>
                         </div>
                       </td>
@@ -347,6 +368,28 @@ function ShopItemForm({ value, submitLabel, onChange, onSubmit }) {
       <label>
         Name *
         <input value={value.name || ""} onChange={(event) => onChange("name", event.target.value)} required />
+      </label>
+      <label>
+        Fixed grant amount ($) *
+        <input
+          type="number"
+          min="0.01"
+          step="0.01"
+          value={value.priceUsd || ""}
+          onChange={(event) => onChange("priceUsd", event.target.value)}
+          required
+        />
+      </label>
+      <label>
+        Coin cost *
+        <input
+          type="number"
+          min="1"
+          step="1"
+          value={value.price || ""}
+          onChange={(event) => onChange("price", event.target.value)}
+          required
+        />
       </label>
       <div className="admin-shop-form-wide">
         <label>
