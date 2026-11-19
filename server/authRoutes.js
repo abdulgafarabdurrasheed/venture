@@ -5,6 +5,7 @@ import {
   describeHackClubProfile,
   exchangeAuthorizationCode,
   fetchHackClubMe,
+  GRANT_ADDRESS_SCOPES,
   getAppOrigin,
   getAuthorizeUrl,
   isHackClubAuthEnabled,
@@ -22,6 +23,7 @@ import {
   resolveHackatimeRedirectUri,
 } from "./hackatimeAuth.js";
 import { syncSignupToAirtable } from "./airtableSignups.js";
+import { syncYswsSubmissionsForUser } from "./airtableYsws.js";
 import {
   clearProductionAuthCookies,
   readProductionAuthUserId,
@@ -36,12 +38,16 @@ import {
   isDatabaseConnectionError,
   toPublicUser,
   toPublicUserFromSessionSnapshot,
+  updateGrantIdentityFromHackClub,
   upsertDevUser,
   upsertUserFromHackClub,
 } from "./users.js";
 import { getDefaultDevEmail } from "./env.js";
 
 const LOCAL_DEV_AUTH_COOKIE = "offtrack.local_user";
+const GRANT_ADDRESS_STATE_COOKIE = "hc_grant_address_state";
+const GRANT_ADDRESS_REDIRECT_COOKIE = "hc_grant_address_redirect_uri";
+const GRANT_ADDRESS_RETURN_TO_COOKIE = "hc_grant_address_return_to";
 const IS_PROD = process.env.NODE_ENV === "production";
 
 const OAUTH_COOKIE_OPTIONS = {
@@ -73,6 +79,12 @@ function normalizeReturnTo(value) {
     return "/projects";
   }
   return trimmed;
+}
+
+function grantAddressResultUrl(appOrigin, returnTo, result) {
+  const target = new URL(normalizeReturnTo(returnTo), appOrigin);
+  target.searchParams.set("grant_address", result);
+  return target.toString();
 }
 
 const LOCAL_DEV_AUTH_COOKIE_OPTIONS = {
@@ -159,23 +171,62 @@ export function createAuthRouter({ rateLimiter } = {}) {
     res.redirect(302, url);
   });
 
+  router.get("/hackclub/grant-address", (req, res) => {
+    if (!req.session?.userId) {
+      res.redirect(302, `${getAppOrigin()}/login?returnTo=%2Fshop`);
+      return;
+    }
+    if (!isHackClubAuthEnabled()) {
+      res.redirect(302, `${getAppOrigin()}/shop?grant_address=unavailable`);
+      return;
+    }
+
+    try {
+      const redirectUri = resolveOAuthRedirectUri(req);
+      const returnTo = normalizeReturnTo(req.query?.returnTo);
+      const state = crypto.randomBytes(24).toString("hex");
+      res.cookie(GRANT_ADDRESS_STATE_COOKIE, state, OAUTH_COOKIE_OPTIONS);
+      res.cookie(GRANT_ADDRESS_REDIRECT_COOKIE, redirectUri, OAUTH_COOKIE_OPTIONS);
+      res.cookie(GRANT_ADDRESS_RETURN_TO_COOKIE, returnTo, OAUTH_COOKIE_OPTIONS);
+      res.redirect(302, getAuthorizeUrl({ state, redirectUri, scopes: GRANT_ADDRESS_SCOPES }));
+    } catch (error) {
+      console.error("[auth] Grant address authorization setup failed:", error);
+      res.redirect(302, `${getAppOrigin()}/shop?grant_address=unavailable`);
+    }
+  });
+
   router.get("/hackclub/callback", async (req, res) => {
     if (!isHackClubAuthEnabled()) {
       res.redirect(302, `${getAppOrigin()}/login?error=oauth_config`);
       return;
     }
 
-    const storedRedirectUri = req.cookies?.hc_oauth_redirect_uri;
-    const cookieState = req.cookies?.hc_oauth_state;
-    const returnTo = normalizeReturnTo(req.cookies?.hc_oauth_return_to);
+    const queryState = typeof req.query?.state === "string" ? req.query.state : "";
+    const grantAddressState = req.cookies?.[GRANT_ADDRESS_STATE_COOKIE];
+    const isGrantAddressFlow = Boolean(queryState && grantAddressState === queryState);
+    const storedRedirectUri = isGrantAddressFlow
+      ? req.cookies?.[GRANT_ADDRESS_REDIRECT_COOKIE]
+      : req.cookies?.hc_oauth_redirect_uri;
+    const cookieState = isGrantAddressFlow ? grantAddressState : req.cookies?.hc_oauth_state;
+    const returnTo = normalizeReturnTo(
+      isGrantAddressFlow
+        ? req.cookies?.[GRANT_ADDRESS_RETURN_TO_COOKIE]
+        : req.cookies?.hc_oauth_return_to
+    );
     const redirectUri =
       typeof storedRedirectUri === "string" && storedRedirectUri
         ? storedRedirectUri
         : process.env.HC_REDIRECT_URI?.trim() || null;
 
-    res.clearCookie("hc_oauth_state", OAUTH_COOKIE_CLEAR_OPTIONS);
-    res.clearCookie("hc_oauth_redirect_uri", OAUTH_COOKIE_CLEAR_OPTIONS);
-    res.clearCookie("hc_oauth_return_to", OAUTH_COOKIE_CLEAR_OPTIONS);
+    if (isGrantAddressFlow) {
+      res.clearCookie(GRANT_ADDRESS_STATE_COOKIE, OAUTH_COOKIE_CLEAR_OPTIONS);
+      res.clearCookie(GRANT_ADDRESS_REDIRECT_COOKIE, OAUTH_COOKIE_CLEAR_OPTIONS);
+      res.clearCookie(GRANT_ADDRESS_RETURN_TO_COOKIE, OAUTH_COOKIE_CLEAR_OPTIONS);
+    } else {
+      res.clearCookie("hc_oauth_state", OAUTH_COOKIE_CLEAR_OPTIONS);
+      res.clearCookie("hc_oauth_redirect_uri", OAUTH_COOKIE_CLEAR_OPTIONS);
+      res.clearCookie("hc_oauth_return_to", OAUTH_COOKIE_CLEAR_OPTIONS);
+    }
 
     const appOrigin = redirectUri ? appOriginFromRedirectUri(redirectUri) : getAppOrigin();
 
@@ -184,16 +235,28 @@ export function createAuthRouter({ rateLimiter } = {}) {
       const state = req.query.state;
 
       if (typeof code !== "string" || !code) {
+        if (isGrantAddressFlow) {
+          res.redirect(302, grantAddressResultUrl(appOrigin, returnTo, "cancelled"));
+          return;
+        }
         res.redirect(302, `${appOrigin}/login?error=oauth_missing_code`);
         return;
       }
 
       if (typeof state !== "string" || !cookieState || state !== cookieState) {
+        if (isGrantAddressFlow) {
+          res.redirect(302, grantAddressResultUrl(appOrigin, returnTo, "error"));
+          return;
+        }
         res.redirect(302, `${appOrigin}/login?error=oauth_state`);
         return;
       }
 
       if (!redirectUri) {
+        if (isGrantAddressFlow) {
+          res.redirect(302, grantAddressResultUrl(appOrigin, returnTo, "unavailable"));
+          return;
+        }
         res.redirect(302, `${appOrigin}/login?error=oauth_missing_redirect`);
         return;
       }
@@ -201,6 +264,10 @@ export function createAuthRouter({ rateLimiter } = {}) {
       const token = await exchangeAuthorizationCode(code, redirectUri);
       const accessToken = token.access_token;
       if (!accessToken) {
+        if (isGrantAddressFlow) {
+          res.redirect(302, grantAddressResultUrl(appOrigin, returnTo, "error"));
+          return;
+        }
         res.redirect(302, `${appOrigin}/login?error=oauth_no_access_token`);
         return;
       }
@@ -210,9 +277,30 @@ export function createAuthRouter({ rateLimiter } = {}) {
         console.log("[auth] HCA /me profile shape:", describeHackClubProfile(profile));
       }
 
+      if (isGrantAddressFlow) {
+        const userId = req.session?.userId;
+        if (!userId) {
+          res.redirect(302, grantAddressResultUrl(appOrigin, returnTo, "login_required"));
+          return;
+        }
+        const currentUser = await getUserById(userId);
+        if (!currentUser || currentUser.hackclub_sub !== hackclubSubFromProfile(profile)) {
+          res.redirect(302, grantAddressResultUrl(appOrigin, returnTo, "identity_mismatch"));
+          return;
+        }
+        const addressSaved = await updateGrantIdentityFromHackClub(userId, profile);
+        if (addressSaved) {
+          void syncYswsSubmissionsForUser(userId).catch((error) => {
+            console.error("[auth] YSWS grant profile refresh failed:", error?.message || error);
+          });
+        }
+        res.redirect(302, grantAddressResultUrl(appOrigin, returnTo, addressSaved ? "connected" : "incomplete"));
+        return;
+      }
+
       let user = null;
       try {
-        user = await upsertUserFromHackClub({ profile, token });
+        user = await upsertUserFromHackClub({ profile });
       } catch (dbError) {
         const dbUnavailable = isDatabaseConnectionError(dbError);
         console.error("[auth] Postgres user upsert failed:", {
@@ -280,7 +368,12 @@ export function createAuthRouter({ rateLimiter } = {}) {
         queryError: req.query?.error,
         queryErrorDescription: req.query?.error_description,
       });
-      res.redirect(302, `${appOrigin}/login?error=oauth_callback`);
+      res.redirect(
+        302,
+        isGrantAddressFlow
+          ? grantAddressResultUrl(appOrigin, returnTo, "error")
+          : `${appOrigin}/login?error=oauth_callback`
+      );
     }
   });
 

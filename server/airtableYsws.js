@@ -484,7 +484,7 @@ function yswsJustificationForProject(project, status) {
 }
 
 function buildSubmissionFromContext({ project, user, status }) {
-  const identity = extractIdentity(user.raw_profile);
+  const identity = extractIdentity(user.grant_identity);
   const address = extractAddress(identity);
   const firstName = identity.first_name ?? identity.firstName ?? null;
   const lastName = identity.last_name ?? identity.lastName ?? null;
@@ -661,7 +661,7 @@ async function getProjectContext(projectId) {
 
   const result = await pool.query(
     `
-      SELECT projects.*, users.email AS user_email, users.raw_profile AS user_raw_profile,
+      SELECT projects.*, users.email AS user_email, users.grant_identity AS user_grant_identity,
              users.hackatime_github_username AS user_github_username,
              users.hackatime_user_id AS user_hackatime_id
       FROM projects
@@ -1028,7 +1028,7 @@ export async function syncApprovedYswsSubmissionForProject(projectId) {
   const localSubmission = await upsertLocalSubmission(
     buildSubmissionFromContext({
       project: row,
-      user: { email: row.user_email, raw_profile: row.user_raw_profile, githubUsername: row.user_github_username },
+      user: { email: row.user_email, grant_identity: row.user_grant_identity, githubUsername: row.user_github_username },
       status: YSWS_STATUS.approved,
     })
   );
@@ -1046,6 +1046,38 @@ export async function syncApprovedYswsSubmissionForProject(projectId) {
     created: airtableResult.created,
     skippedAirtable: airtableResult.skipped,
   };
+}
+
+export async function syncYswsSubmissionsForUser(userId) {
+  if (!pool) return { ok: false, skipped: true, reason: "DATABASE_URL not set." };
+  const result = await pool.query(
+    `
+      SELECT id
+      FROM projects
+      WHERE user_id = $1
+        AND (
+          (status = 'approved' AND reviewed IS TRUE)
+          OR (status = 'in-review' AND shipped IS TRUE AND reviewed IS NOT TRUE)
+          OR status = 'pending-reship'
+          OR ship_kind = 'reship'
+        )
+      ORDER BY id
+    `,
+    [userId]
+  );
+
+  let synced = 0;
+  let failed = 0;
+  for (const row of result.rows) {
+    try {
+      await submitProjectToYsws(row.id);
+      synced += 1;
+    } catch (error) {
+      failed += 1;
+      console.error("[ysws] address refresh failed for project:", row.id, error?.message || error);
+    }
+  }
+  return { ok: failed === 0, synced, failed };
 }
 
 export async function submitProjectToYsws(projectId) {
@@ -1077,7 +1109,7 @@ export async function submitProjectToYsws(projectId) {
   const localSubmission = await upsertLocalSubmission(
     buildSubmissionFromContext({
       project: row,
-      user: { email: row.user_email, raw_profile: row.user_raw_profile, githubUsername: row.user_github_username },
+      user: { email: row.user_email, grant_identity: row.user_grant_identity, githubUsername: row.user_github_username },
       status,
     })
   );

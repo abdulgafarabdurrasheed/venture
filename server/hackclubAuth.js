@@ -1,9 +1,17 @@
 const AUTH_BASE = "https://auth.hackclub.com";
 const OAUTH_CALLBACK_PATH = "/api/auth/hackclub/callback";
+// Address is a grant-checkout need, not a sign-in need; see GRANT_ADDRESS_SCOPES.
 const DEFAULT_SCOPES = [
   "openid",
   "email",
   "name",
+  "profile",
+  "verification_status",
+  "slack_id",
+  "basic_info",
+];
+export const GRANT_ADDRESS_SCOPES = [
+  "openid",
   "profile",
   "birthdate",
   "address",
@@ -150,12 +158,14 @@ export function appOriginFromRedirectUri(redirectUri) {
   }
 }
 
-export function getAuthorizeUrl({ state, redirectUri }) {
+export function getAuthorizeUrl({ state, redirectUri, scopes }) {
   const clientId = requiredEnv("HC_CLIENT_ID");
   const configuredScopes = (process.env.HC_SCOPES || "").trim();
-  const scopeList = configuredScopes
-    ? configuredScopes.split(/\s+/).filter(Boolean)
-    : DEFAULT_SCOPES;
+  const scopeList = Array.isArray(scopes)
+    ? scopes
+    : configuredScopes
+      ? configuredScopes.split(/\s+/).filter(Boolean)
+      : DEFAULT_SCOPES;
   const scope = [...new Set(scopeList)].join(" ");
 
   const params = new URLSearchParams({
