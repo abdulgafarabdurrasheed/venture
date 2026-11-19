@@ -40,11 +40,13 @@ import {
   listShopOrders,
   markShopOrderFulfilled,
   purchaseShopItemForUser,
+  recordShopOrderGrantIssuance,
   rejectShopOrderWithRefund,
   reorderShopItems,
   setAllShopItemsActive,
   updateShopItem,
 } from "./shopItems.js";
+import { getGrantTermsForDisplay } from "./grantTerms.js";
 import {
   approveAdminReviewProject, awardStarsToProject,
   blockAdminReviewProject,
@@ -307,6 +309,10 @@ app.get("/api/shop/items", async (req, res) => {
     console.error("Failed to load shop items:", error);
     res.status(500).json({ error: "Failed to load shop items." });
   }
+});
+
+app.get("/api/shop/grant-terms", requireUser, (req, res) => {
+  res.json(getGrantTermsForDisplay());
 });
 
 app.post("/api/shop/items/:id/buy", requireUser, async (req, res) => {
@@ -973,9 +979,19 @@ app.get("/api/admin/shop/orders", requireFullAdmin, async (req, res) => {
   }
 });
 
+app.post("/api/admin/shop/orders/:id/issue-grant", requireFullAdmin, async (req, res) => {
+  try {
+    const order = await recordShopOrderGrantIssuance(req.params.id, req.session?.userId, req.body);
+    res.json({ order });
+  } catch (error) {
+    console.error("Failed to record grant issuance:", error);
+    res.status(error.message === "Order not found." ? 404 : 400).json({ error: error.message || "Failed to record grant issuance." });
+  }
+});
+
 app.post("/api/admin/shop/orders/:id/fulfill", requireFullAdmin, async (req, res) => {
   try {
-    const order = await markShopOrderFulfilled(req.params.id);
+    const order = await markShopOrderFulfilled(req.params.id, req.session?.userId, req.body);
     if (!order) {
       res.status(404).json({ error: "Order not found." });
       return;
@@ -983,7 +999,7 @@ app.post("/api/admin/shop/orders/:id/fulfill", requireFullAdmin, async (req, res
     res.json({ order });
   } catch (error) {
     console.error("Failed to fulfill shop order:", error);
-    res.status(500).json({ error: "Failed to fulfill order." });
+    res.status(error.message === "Order not found." ? 404 : 400).json({ error: error.message || "Failed to fulfill order." });
   }
 });
 

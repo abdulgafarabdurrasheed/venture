@@ -1,6 +1,5 @@
 import { apiFetch } from "../api/client.js";
 import { useEffect, useState } from "react";
-import { COINS_PER_APPROVED_HOUR, COINS_PER_USD, USD_PER_APPROVED_HOUR } from "../constants/coinRates.js";
 import { CDN_UPLOAD_HELP, isHackClubCdnUrl, normalizeHackClubCdnUrl } from "../utils/cdnLinks.js";
 import { shopItemPayload } from "../utils/shopItemPayload.js";
 import { DEFAULT_SHOP_LABEL_COLOR, SHOP_LABEL_COLORS } from "../constants/shopLabelColors.js";
@@ -8,6 +7,8 @@ import "./AdminShopPage.css";
 
 const emptyForm = {
   name: "",
+  price: "",
+  priceUsd: "",
   frameLabel: "",
   frameLabelColor: DEFAULT_SHOP_LABEL_COLOR,
   discountPercent: "",
@@ -17,6 +18,11 @@ const emptyForm = {
   description: "",
   active: true,
 };
+
+function formatUsd(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? `$${amount.toFixed(2)}` : "—";
+}
 
 function sortShopItems(items) {
   return [...items].sort((a, b) => {
@@ -182,15 +188,13 @@ export function AdminShopPage() {
         <h1>Shop Admin</h1>
 
         <p className="admin-shop-pricing-note">
-          Items have no fixed price. At checkout, participants enter how much they need in dollars. The platform
-          charges coins at ${USD_PER_APPROVED_HOUR}/approved hour ({COINS_PER_APPROVED_HOUR} coins/hour, {COINS_PER_USD}{" "}
-          coins per $1). Use the order controls to set shop display order, and add a frame label for each item shown on
-          the shop card.
+          Set each item’s grant amount and coin cost in the catalog. Participants request that fixed grant amount; staff
+          record the issued grant reference and delivery details on the order.
         </p>
 
         <div className="admin-shop-orders-link">
           <a href="/admin/shop/orders">📦 Shop orders queue</a>
-          <span>Fulfill purchases, refunds, and grouped pending lines.</span>
+          <span>Review requests, record grant issuance and delivery, and handle refunds.</span>
         </div>
 
         {error ? <p className="admin-shop-error">{error}</p> : null}
@@ -234,6 +238,8 @@ export function AdminShopPage() {
                   <th>Order</th>
                   <th>ID</th>
                   <th>Name</th>
+                  <th>Grant amount</th>
+                  <th>Coin cost</th>
                   <th>Frame label</th>
                   <th>Max / person</th>
                   <th>Discount</th>
@@ -245,7 +251,7 @@ export function AdminShopPage() {
               <tbody>
                 {visibleItems.length === 0 ? (
                   <tr>
-                    <td colSpan="9">No shop items yet.</td>
+                    <td colSpan="11">No shop items yet.</td>
                   </tr>
                 ) : (
                   visibleItems.map((item) => {
@@ -277,6 +283,8 @@ export function AdminShopPage() {
                       </td>
                       <td>{item.id}</td>
                       <td>{item.name || "—"}</td>
+                      <td>{formatUsd(item.priceUsd)}</td>
+                      <td>{item.price ?? "—"}</td>
                       <td>{item.frameLabel || "—"}</td>
                       <td>{item.maxPerPerson ?? "None"}</td>
                       <td>{item.discountPercent ? `${item.discountPercent}% off` : "—"}</td>
@@ -347,6 +355,28 @@ function ShopItemForm({ value, submitLabel, onChange, onSubmit }) {
       <label>
         Name *
         <input value={value.name || ""} onChange={(event) => onChange("name", event.target.value)} required />
+      </label>
+      <label>
+        Grant amount (USD) *
+        <input
+          type="number"
+          min="0.01"
+          step="0.01"
+          value={value.priceUsd ?? ""}
+          onChange={(event) => onChange("priceUsd", event.target.value)}
+          required
+        />
+      </label>
+      <label>
+        Coin cost *
+        <input
+          type="number"
+          min="1"
+          step="1"
+          value={value.price ?? ""}
+          onChange={(event) => onChange("price", event.target.value)}
+          required
+        />
       </label>
       <div className="admin-shop-form-wide">
         <label>

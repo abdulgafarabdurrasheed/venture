@@ -1,6 +1,6 @@
 import { persistOrderAirtableRecordId, syncShopOrderToAirtable } from "./airtableOrders.js";
-import { MIN_PURCHASE_USD, usdToCoins } from "./coinRates.js";
 import { pool } from "./db.js";
+import { GRANT_TERMS_VERSION, snapshotAcknowledgedGrantTerms } from "./grantTerms.js";
 import { normalizeShopLabelColor, shopLabelColorHex } from "./shopLabelColors.js";
 import { setCoinLedgerContext } from "./coinLedger.js";
 
@@ -114,6 +114,16 @@ export async function ensureShopItemsTable() {
   await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS item_name_snapshot VARCHAR`);
   await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS item_price_snapshot NUMERIC(10, 2)`);
   await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS item_price_usd_snapshot NUMERIC(10, 2)`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS grant_terms_version VARCHAR`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS grant_terms_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS grant_acknowledged_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS grant_issued_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS grant_issued_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS grant_issuance_reference VARCHAR`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS grant_issuance_note TEXT`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS fulfilled_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS fulfilled_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS fulfillment_note TEXT`);
 
   await migrateLegacyShopOrdersSchema();
 
@@ -431,12 +441,7 @@ function normalizeItemUsage(value) {
 export async function purchaseShopItemForUser(userId, itemId, input = {}) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
-  const amountUsd = numberOrNull(input.amountUsd ?? input.amount_usd ?? input.usdAmount);
-  const totalCoins = usdToCoins(amountUsd);
-  if (totalCoins === null) {
-    throw new Error(`Minimum purchase is $${MIN_PURCHASE_USD.toFixed(2)}.`);
-  }
-
+  const grantTermsSnapshot = snapshotAcknowledgedGrantTerms(input);
   const itemUsage = normalizeItemUsage(input.itemUsage ?? input.item_usage);
 
   const quantity = 1;
@@ -456,6 +461,12 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
     );
     const item = itemResult.rows[0];
     if (!item) throw new Error("Shop item not found.");
+
+    const amountUsd = numberOrNull(item.price_usd);
+    const totalCoins = numberOrNull(item.price);
+    if (amountUsd === null || amountUsd <= 0 || totalCoins === null || totalCoins <= 0) {
+      throw new Error("This shop item is not available for purchase until staff sets its grant amount and coin cost.");
+    }
 
     const currentUserResult = await client.query("SELECT total_stars, coins FROM users WHERE id = $1", [userId]);
     const user = currentUserResult.rows[0];
@@ -499,7 +510,7 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
       const currentUser = await client.query("SELECT coins FROM users WHERE id = $1", [userId]);
       const availableCoins = Number(currentUser.rows[0]?.coins ?? 0);
       throw new Error(
-        `Not enough coins. You have ${formatCoinAmount(availableCoins)} coins, but this costs ${formatCoinAmount(totalCoins)} (${formatUsdAmount(amountUsd)}).`
+        `Not enough coins. You have ${formatCoinAmount(availableCoins)} coins, but this item costs ${formatCoinAmount(totalCoins)} coins.`
       );
     }
 
@@ -507,12 +518,25 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
       `
         INSERT INTO shop_orders (
           user_id, item_id, item_name_snapshot, item_price_snapshot, item_price_usd_snapshot,
-          quantity, total_coins, total_usd, item_usage, created_at, updated_at
+          quantity, total_coins, total_usd, item_usage, grant_terms_version,
+          grant_terms_snapshot, grant_acknowledged_at, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, NOW(), NOW(), NOW())
         RETURNING id
       `,
-      [userId, itemId, item.name, item.price, item.price_usd, quantity, totalCoins, amountUsd, itemUsage]
+      [
+        userId,
+        itemId,
+        item.name,
+        totalCoins,
+        amountUsd,
+        quantity,
+        totalCoins,
+        amountUsd,
+        itemUsage,
+        GRANT_TERMS_VERSION,
+        grantTermsSnapshot,
+      ]
     );
 
     await client.query("COMMIT");
@@ -560,6 +584,15 @@ function normalizeShopItemInput(input = {}) {
   if (!textOrNull(input.name)) {
     throw new Error("Shop item name is required.");
   }
+  if (price === null || price <= 0) {
+    throw new Error("Set a positive whole-number coin cost for this shop item.");
+  }
+  if (priceUsd === null || priceUsd <= 0) {
+    throw new Error("Set a positive grant amount for this shop item.");
+  }
+  if (Number(priceUsd.toFixed(2)) !== priceUsd) {
+    throw new Error("Grant amount must use at most two decimal places.");
+  }
 
   return {
     name: textOrNull(input.name),
@@ -603,6 +636,19 @@ function textOrNull(value) {
   return text ? text : null;
 }
 
+function requiredText(value, label, maxLength) {
+  const text = textOrNull(value);
+  if (!text) throw new Error(`${label} is required.`);
+  if (text.length > maxLength) throw new Error(`${label} must be ${maxLength} characters or fewer.`);
+  return text;
+}
+
+function optionalText(value, label, maxLength) {
+  const text = textOrNull(value);
+  if (text && text.length > maxLength) throw new Error(`${label} must be ${maxLength} characters or fewer.`);
+  return text;
+}
+
 function numberOrNull(value) {
   if (value === undefined || value === null || value === "") return null;
   const number = Number(value);
@@ -616,9 +662,9 @@ function integerOrNull(value) {
 
 function optionalCoinPriceOrNull(value) {
   if (value === undefined || value === null || value === "") return null;
-  const price = integerOrNull(value);
-  if (price === null || price < 0) {
-    throw new Error("Legacy coin price must be a non-negative amount.");
+  const price = numberOrNull(value);
+  if (price === null || !Number.isInteger(price) || price < 0) {
+    throw new Error("Coin cost must be a non-negative whole number.");
   }
   return price;
 }
@@ -627,12 +673,6 @@ function formatCoinAmount(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "0";
   return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2);
-}
-
-function formatUsdAmount(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "$0.00";
-  return `$${numeric.toFixed(2)}`;
 }
 
 function discountPercentOrNull(value) {
@@ -668,10 +708,25 @@ export async function listShopOrders() {
       o.item_usage,
       o.fulfilled,
       o.rejected,
-      o.created_at
+      o.created_at,
+      o.rejected_at,
+      o.grant_terms_version,
+      o.grant_terms_snapshot,
+      o.grant_acknowledged_at,
+      o.grant_issued_at,
+      o.grant_issued_by_user_id,
+      grant_issuer.email AS grant_issued_by_email,
+      o.grant_issuance_reference,
+      o.grant_issuance_note,
+      o.fulfilled_at,
+      o.fulfilled_by_user_id,
+      fulfiller.email AS fulfilled_by_email,
+      o.fulfillment_note
     FROM shop_orders o
     JOIN users u ON o.user_id = u.id
     LEFT JOIN shop_items i ON o.item_id = i.id
+    LEFT JOIN users grant_issuer ON grant_issuer.id = o.grant_issued_by_user_id
+    LEFT JOIN users fulfiller ON fulfiller.id = o.fulfilled_by_user_id
     ORDER BY o.created_at DESC
   `);
 
@@ -697,7 +752,18 @@ export async function listShopOrdersForUser(userId) {
         o.item_usage,
         o.fulfilled,
         o.rejected,
-        o.created_at
+        o.created_at,
+        o.rejected_at,
+        o.grant_terms_version,
+        o.grant_terms_snapshot,
+        o.grant_acknowledged_at,
+        o.grant_issued_at,
+        o.grant_issued_by_user_id,
+        o.grant_issuance_reference,
+        o.grant_issuance_note,
+        o.fulfilled_at,
+        o.fulfilled_by_user_id,
+        o.fulfillment_note
       FROM shop_orders o
       JOIN users u ON o.user_id = u.id
       LEFT JOIN shop_items i ON o.item_id = i.id
@@ -727,27 +793,89 @@ export function toReviewParticipantShopOrder(order) {
   };
 }
 
-export async function markShopOrderFulfilled(orderId) {
+export async function recordShopOrderGrantIssuance(orderId, actorUserId, input = {}) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
-  const result = await pool.query(
-    `
-      UPDATE shop_orders
-      SET fulfilled = TRUE, updated_at = NOW()
-      WHERE id = $1
-        AND rejected IS NOT TRUE
-      RETURNING *
-    `,
-    [orderId]
-  );
+  const reference = requiredText(input.reference ?? input.grantReference, "Grant reference", 256);
+  const note = optionalText(input.note, "Issuance note", 2000);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query("SELECT * FROM shop_orders WHERE id = $1 FOR UPDATE", [orderId]);
+    const order = current.rows[0];
+    if (!order) throw new Error("Order not found.");
+    if (order.rejected) throw new Error("Rejected orders cannot receive a grant.");
+    if (order.fulfilled) throw new Error("Fulfilled orders cannot be changed.");
+    if (order.grant_issued_at) throw new Error("A grant has already been recorded for this order.");
 
-  const order = result.rows[0] ? toPublicShopOrder(result.rows[0]) : null;
-  if (order) {
+    const result = await client.query(
+      `
+        UPDATE shop_orders
+        SET grant_issued_at = NOW(),
+            grant_issued_by_user_id = $2,
+            grant_issuance_reference = $3,
+            grant_issuance_note = $4,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [orderId, actorUserId, reference, note]
+    );
+    await client.query("COMMIT");
+    const issuedOrder = toPublicShopOrder(result.rows[0]);
     trySyncShopOrderToAirtable(orderId).catch((error) => {
       console.error("[shop] Airtable _orders sync failed:", error.message);
     });
+    return issuedOrder;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
   }
-  return order;
+}
+
+export async function markShopOrderFulfilled(orderId, actorUserId, input = {}) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+
+  const note = requiredText(input.note, "Fulfillment note", 2000);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query("SELECT * FROM shop_orders WHERE id = $1 FOR UPDATE", [orderId]);
+    const order = current.rows[0];
+    if (!order) throw new Error("Order not found.");
+    if (order.rejected) throw new Error("Rejected orders cannot be fulfilled.");
+    if (order.fulfilled) throw new Error("Order is already fulfilled.");
+    if (!order.grant_issued_at || !order.grant_issuance_reference) {
+      throw new Error("Record the issued grant reference before marking this order fulfilled.");
+    }
+
+    const result = await client.query(
+      `
+        UPDATE shop_orders
+        SET fulfilled = TRUE,
+            fulfilled_at = NOW(),
+            fulfilled_by_user_id = $2,
+            fulfillment_note = $3,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [orderId, actorUserId, note]
+    );
+    await client.query("COMMIT");
+    const fulfilledOrder = toPublicShopOrder(result.rows[0]);
+    trySyncShopOrderToAirtable(orderId).catch((error) => {
+      console.error("[shop] Airtable _orders sync failed:", error.message);
+    });
+    return fulfilledOrder;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function rejectShopOrderWithRefund(orderId, actorUserId = null) {
@@ -770,6 +898,7 @@ export async function rejectShopOrderWithRefund(orderId, actorUserId = null) {
     if (!order) throw new Error("Order not found.");
     if (order.fulfilled) throw new Error("Fulfilled orders cannot be rejected.");
     if (order.rejected) throw new Error("Order is already rejected.");
+    if (order.grant_issued_at) throw new Error("An issued grant cannot be rejected or refunded here. Resolve it manually.");
 
     await setCoinLedgerContext(client, { reason: "shop_order_refund", referenceType: "shop_order", referenceId: orderId, actorUserId });
     await client.query("UPDATE users SET coins = coins + $1, updated_at = NOW() WHERE id = $2", [
@@ -874,6 +1003,15 @@ function toPublicShopItem(row) {
 }
 
 function toPublicShopOrder(row) {
+  let grantTermsSnapshot = row.grant_terms_snapshot ?? [];
+  if (typeof grantTermsSnapshot === "string") {
+    try {
+      grantTermsSnapshot = JSON.parse(grantTermsSnapshot);
+    } catch {
+      grantTermsSnapshot = [];
+    }
+  }
+
   return {
     id: row.id,
     userId: row.user_id,
@@ -888,6 +1026,20 @@ function toPublicShopOrder(row) {
     itemUsage: row.item_usage,
     fulfilled: row.fulfilled,
     rejected: row.rejected,
+    status: row.rejected ? "rejected" : row.fulfilled ? "fulfilled" : row.grant_issued_at ? "issued" : "pending",
     createdAt: row.created_at,
+    rejectedAt: row.rejected_at,
+    grantTermsVersion: row.grant_terms_version,
+    grantTermsSnapshot,
+    grantAcknowledgedAt: row.grant_acknowledged_at,
+    grantIssuedAt: row.grant_issued_at,
+    grantIssuedByUserId: row.grant_issued_by_user_id,
+    grantIssuedByEmail: row.grant_issued_by_email,
+    grantIssuanceReference: row.grant_issuance_reference,
+    grantIssuanceNote: row.grant_issuance_note,
+    fulfilledAt: row.fulfilled_at,
+    fulfilledByUserId: row.fulfilled_by_user_id,
+    fulfilledByEmail: row.fulfilled_by_email,
+    fulfillmentNote: row.fulfillment_note,
   };
 }

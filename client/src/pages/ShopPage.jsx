@@ -74,13 +74,7 @@ export function ShopPage() {
   const handlePurchased = useCallback(
     async (purchase) => {
       await reload?.();
-      const usd = purchase?.totalUsd ?? purchase?.amountUsd;
-      const coins = purchase?.totalCoins;
-      const detail =
-        usd != null && coins != null
-          ? ` (${Number(usd).toFixed(2)} → ${coins} coins)`
-          : "";
-      setPurchaseMessage(`Purchased ${purchase?.item?.name || "item"}${detail}.`);
+      setPurchaseMessage(`Order placed for ${purchase?.item?.name || "item"}.`);
     },
     [reload]
   );
