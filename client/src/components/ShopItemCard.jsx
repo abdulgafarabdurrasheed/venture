@@ -27,8 +27,10 @@ function formatDiscount(value) {
   return Math.round(numeric);
 }
 
-export function ShopItemCard({ item, onOpen, disabled }) {
+export function ShopItemCard({ item, onOpen, disabled, userStars = 0 }) {
   const discount = formatDiscount(item.discountPercent);
+  const requiredStars = Number(item.requiredStars) || 0;
+  const isStarLocked = requiredStars > Number(userStars || 0);
   const imageSrc = resolveShopItemImage(item);
   const usesCustomImage = Boolean(item?.imageUrl);
   const frameLabel = String(item.frameLabel || "").trim();
@@ -53,6 +55,15 @@ export function ShopItemCard({ item, onOpen, disabled }) {
           {discount ? (
             <span className="shop-item-card__coin" aria-label={`${discount}% off`}>
               <span className="shop-item-card__coin-value">{discount}</span>
+            </span>
+          ) : null}
+
+          {requiredStars > 0 ? (
+            <span
+              className={`shop-item-card__star-gate${isStarLocked ? " is-locked" : ""}`}
+              aria-label={isStarLocked ? `Requires ${requiredStars} stars to unlock` : `Unlocked with ${requiredStars} stars`}
+            >
+              {isStarLocked ? `${requiredStars}★ to unlock` : "★ unlocked"}
             </span>
           ) : null}
 

@@ -110,6 +110,10 @@ export function ProjectDetailModal({ project, onClose, onEdit, onJournal, onDele
           <dd>{displayStatus(project)}</dd>
         </div>
         <div>
+          <dt>Stars</dt>
+          <dd>{Number(project.stars ?? 0)}</dd>
+        </div>
+        <div>
           <dt>Hours logged (combined)</dt>
           <dd>{formatHours(getLoggedHours(project))}</dd>
         </div>

@@ -22,10 +22,18 @@ export async function ensureNotificationsTable() {
 
 export async function insertNotification(userId, type, message, metadata = {}) {
   if (!pool) return;
-  await pool.query(
-    `INSERT INTO notifications (user_id, type, message, metadata) VALUES ($1, $2, $3, $4)`,
-    [userId, type, message, metadata]
-  );
+  try {
+    await pool.query(
+      `INSERT INTO notifications (user_id, type, message, metadata) VALUES ($1, $2, $3, $4)`,
+      [userId, type, message, metadata]
+    );
+  } catch (error) {
+    console.error("[notifications] insert failed:", {
+      userId,
+      type,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export async function getUnreadNotifications(userId) {

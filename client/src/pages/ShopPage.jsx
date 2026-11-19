@@ -107,7 +107,7 @@ export function ShopPage() {
           ) : (
             <div className="shop-page__grid">
               {visibleItems.map((item) => (
-                <ShopItemCard key={item.id} item={item} onOpen={setSelectedItem} />
+                <ShopItemCard key={item.id} item={item} userStars={user?.totalStars} onOpen={setSelectedItem} />
               ))}
             </div>
           )}
@@ -117,6 +117,7 @@ export function ShopPage() {
       <ShopPurchaseModal
         item={selectedItem}
         userCoins={user?.coins}
+        userStars={user?.totalStars}
         onClose={() => setSelectedItem(null)}
         onPurchased={handlePurchased}
       />

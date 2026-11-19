@@ -121,6 +121,24 @@ export function ProjectsPage() {
   }, [loadProjects, loadHackatimeStatus]);
 
   useEffect(() => {
+    if (loading) return;
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get("project");
+    if (!projectId) return;
+    const requestedProject = projects.find((project) => String(project.id) === projectId);
+    if (!requestedProject) return;
+
+    setSelectedProject(requestedProject);
+    params.delete("project");
+    const query = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`
+    );
+  }, [loading, projects]);
+
+  useEffect(() => {
     if (!editingProject) return;
     refreshHackatimeHours();
   }, [editingProject?.id ?? "new", refreshHackatimeHours]);
