@@ -502,6 +502,42 @@
   font-style: italic;
 }
 
+.admin-shop-order-terms,
+.admin-shop-order-issuance,
+.admin-shop-order-fulfillment {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.75rem 0;
+  padding: 0.8rem;
+  border: 1px solid rgba(139, 98, 57, 0.35);
+  border-radius: 10px;
+  background: rgba(35, 22, 12, 0.42);
+  color: #f5e6c8;
+  overflow-wrap: anywhere;
+}
+
+.admin-shop-order-terms strong,
+.admin-shop-order-issuance strong,
+.admin-shop-order-fulfillment strong {
+  color: #f7cf57;
+}
+
+.admin-shop-order-terms ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.admin-shop-order-terms li {
+  margin: 0.35rem 0;
+  line-height: 1.4;
+}
+
+.admin-shop-order-issuance p,
+.admin-shop-order-fulfillment p {
+  margin: 0.25rem 0 0;
+  white-space: pre-wrap;
+}
+
 .admin-shop-order-card footer {
   display: flex;
   flex-wrap: wrap;
@@ -514,6 +550,34 @@
   display: grid;
   align-content: start;
   gap: 0.75rem;
+}
+
+.admin-shop-order-card-actions label {
+  display: grid;
+  gap: 0.35rem;
+  color: #f5e6c8;
+  font-weight: 700;
+}
+
+.admin-shop-order-card-actions input,
+.admin-shop-order-card-actions textarea {
+  width: 100%;
+  border: 1px solid rgba(247, 207, 87, 0.5);
+  border-radius: 8px;
+  padding: 0.65rem;
+  background: rgba(21, 15, 10, 0.8);
+  color: #fff8e8;
+  font: inherit;
+}
+
+.admin-shop-order-card-actions textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
+.admin-shop-order-card-actions p {
+  margin: 0;
+  color: rgba(245, 230, 200, 0.75);
 }
 
 .admin-shop-order-card-actions button {
@@ -589,6 +653,12 @@
   background: rgba(255, 152, 0, 0.25);
   color: #ffb74d;
   border: 1px solid rgba(255, 152, 0, 0.5);
+}
+
+.status-badge.issued {
+  border-color: rgba(129, 170, 255, 0.6);
+  background: rgba(37, 74, 143, 0.4);
+  color: #cfe0ff;
 }
 
 .status-badge.fulfilled {

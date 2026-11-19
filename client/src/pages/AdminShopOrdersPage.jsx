@@ -15,6 +15,7 @@ function formatDate(value) {
 function orderStatus(order) {
   if (order.rejected) return "rejected";
   if (order.fulfilled) return "fulfilled";
+  if (order.grantIssuedAt) return "issued";
   return "pending";
 }
 
@@ -36,9 +37,11 @@ export function AdminShopOrdersPage() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("pending");
+  const [statusFilter, setStatusFilter] = useState("open");
   const [groupBy, setGroupBy] = useState("flat");
   const [sortOrder, setSortOrder] = useState("newest");
+  const [issuanceInputs, setIssuanceInputs] = useState({});
+  const [fulfillmentNotes, setFulfillmentNotes] = useState({});
 
   useEffect(() => {
     async function loadOrders() {
@@ -57,18 +60,36 @@ export function AdminShopOrdersPage() {
     loadOrders();
   }, []);
 
+  async function markAsIssued(orderId) {
+    try {
+      const input = issuanceInputs[orderId] || {};
+      const response = await apiFetch(`/api/admin/shop/orders/${orderId}/issue-grant`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to record grant issuance.");
+
+      setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, ...data.order } : order)));
+    } catch (err) {
+      alert(`Error: ${err.message}`);
+    }
+  }
+
   async function markAsFulfilled(orderId) {
     try {
       const response = await apiFetch(`/api/admin/shop/orders/${orderId}/fulfill`, {
         method: "POST",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: fulfillmentNotes[orderId] || "" }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to fulfill order.");
 
-      setOrders((prev) =>
-        prev.map((order) => (order.id === orderId ? { ...order, fulfilled: true } : order))
-      );
+      setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, ...data.order } : order)));
     } catch (err) {
       alert(`Error: ${err.message}`);
     }
@@ -86,16 +107,19 @@ export function AdminShopOrdersPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to reject order.");
 
-      setOrders((prev) =>
-        prev.map((current) => (current.id === order.id ? { ...current, rejected: true } : current))
-      );
+      setOrders((prev) => prev.map((current) => (current.id === order.id ? { ...current, ...data.order } : current)));
     } catch (err) {
       alert(`Error: ${err.message}`);
     }
   }
 
   const visibleOrders = useMemo(() => {
-    const filtered = orders.filter((order) => statusFilter === "all" || orderStatus(order) === statusFilter);
+    const filtered = orders.filter((order) => {
+      const status = orderStatus(order);
+      if (statusFilter === "all") return true;
+      if (statusFilter === "open") return status === "pending" || status === "issued";
+      return status === statusFilter;
+    });
     return [...filtered].sort((a, b) => {
       if (sortOrder === "oldest") return new Date(a.createdAt) - new Date(b.createdAt);
       if (sortOrder === "bricks-high") return Number(b.totalCoins ?? 0) - Number(a.totalCoins ?? 0);
@@ -136,7 +160,9 @@ export function AdminShopOrdersPage() {
               <label>
                 Status
                 <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-                  <option value="pending">Pending queue</option>
+                  <option value="open">Open orders</option>
+                  <option value="pending">Awaiting grant issuance</option>
+                  <option value="issued">Issued, awaiting fulfillment</option>
                   <option value="fulfilled">Fulfilled</option>
                   <option value="rejected">Rejected/refunded</option>
                   <option value="all">All orders</option>
@@ -173,17 +199,19 @@ export function AdminShopOrdersPage() {
                   <div className="admin-shop-order-cards">
                     {groupOrders.map((order) => {
                       const status = orderStatus(order);
-                      const isActionable = status === "pending";
+                      const canIssue = status === "pending";
+                      const canFulfill = status === "issued";
+                      const canReject = status === "pending";
                       return (
                         <article key={order.id} className={`admin-shop-order-card is-${status}`}>
                           <div className="admin-shop-order-card-main">
                             <span className={`status-badge ${status}`}>{status}</span>
                             <h2>{order.itemName || "Unknown item"}</h2>
                             <p>
-                              Purchase: {formatUsd(orderUsdTotal(order))} · {Number(order.totalCoins ?? 0)} coins
+                              Requested grant: {formatUsd(orderUsdTotal(order))} · {Number(order.totalCoins ?? 0)} coins charged
                             </p>
                             <div className="admin-shop-order-money">
-                              <span>Amount requested: {formatUsd(orderUsdTotal(order))}</span>
+                              <span>Catalog grant amount: {formatUsd(orderUsdTotal(order))}</span>
                               <span>Coins charged: {Number(order.totalCoins ?? 0)}</span>
                             </div>
 
@@ -205,6 +233,45 @@ export function AdminShopOrdersPage() {
                               </div>
                             )}
 
+                            <div className="admin-shop-order-terms">
+                              <strong>Participant acknowledgment</strong>
+                              {order.grantTermsVersion ? (
+                                <>
+                                  <span>Terms version: {order.grantTermsVersion}</span>
+                                  <span>Acknowledged: {formatDate(order.grantAcknowledgedAt)}</span>
+                                  <ul>
+                                    {(order.grantTermsSnapshot || []).map((entry) => (
+                                      <li key={entry.id || entry.text}>{entry.text}</li>
+                                    ))}
+                                  </ul>
+                                </>
+                              ) : (
+                                <span>Historical order: acknowledgment was not recorded.</span>
+                              )}
+                            </div>
+
+                            {order.grantIssuedAt ? (
+                              <div className="admin-shop-order-issuance">
+                                <strong>Grant issuance recorded</strong>
+                                <span>Reference: {order.grantIssuanceReference || "Missing"}</span>
+                                <span>Recorded: {formatDate(order.grantIssuedAt)} by {order.grantIssuedByEmail || (order.grantIssuedByUserId ? `user #${order.grantIssuedByUserId}` : "staff account unavailable")}</span>
+                                {order.grantIssuanceNote ? <p>{order.grantIssuanceNote}</p> : null}
+                              </div>
+                            ) : null}
+
+                            {order.fulfilledAt ? (
+                              <div className="admin-shop-order-fulfillment">
+                                <strong>Fulfillment recorded</strong>
+                                <span>Completed: {formatDate(order.fulfilledAt)} by {order.fulfilledByEmail || (order.fulfilledByUserId ? `user #${order.fulfilledByUserId}` : "staff account unavailable")}</span>
+                                {order.fulfillmentNote ? <p>{order.fulfillmentNote}</p> : null}
+                              </div>
+                            ) : order.fulfilled ? (
+                              <div className="admin-shop-order-fulfillment">
+                                <strong>Historical fulfillment</strong>
+                                <span>Timestamp and delivery details were not recorded for this older order.</span>
+                              </div>
+                            ) : null}
+
                             <footer>
                               <span>DB row: #{order.id}</span>
                               <span>Created: {formatDate(order.createdAt)}</span>
@@ -212,12 +279,63 @@ export function AdminShopOrdersPage() {
                           </div>
 
                           <div className="admin-shop-order-card-actions">
-                            <button type="button" disabled={!isActionable} onClick={() => markAsFulfilled(order.id)}>
-                              ✓ Mark fulfilled
-                            </button>
-                            <button type="button" disabled={!isActionable} className="danger" onClick={() => rejectOrder(order)}>
+                            {canIssue ? (
+                              <>
+                                <label>
+                                  Grant reference *
+                                  <input
+                                    value={issuanceInputs[order.id]?.reference || ""}
+                                    onChange={(event) => setIssuanceInputs((current) => ({
+                                      ...current,
+                                      [order.id]: { ...current[order.id], reference: event.target.value },
+                                    }))}
+                                    placeholder="HCB grant ID or link"
+                                  />
+                                </label>
+                                <label>
+                                  Issuance note
+                                  <textarea
+                                    value={issuanceInputs[order.id]?.note || ""}
+                                    maxLength={2000}
+                                    onChange={(event) => setIssuanceInputs((current) => ({
+                                      ...current,
+                                      [order.id]: { ...current[order.id], note: event.target.value },
+                                    }))}
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  disabled={!issuanceInputs[order.id]?.reference?.trim()}
+                                  onClick={() => markAsIssued(order.id)}
+                                >
+                                  Record grant issued
+                                </button>
+                              </>
+                            ) : null}
+                            {canFulfill ? (
+                              <>
+                                <label>
+                                  Fulfillment details *
+                                  <textarea
+                                    value={fulfillmentNotes[order.id] || ""}
+                                    maxLength={2000}
+                                    onChange={(event) => setFulfillmentNotes((current) => ({ ...current, [order.id]: event.target.value }))}
+                                    placeholder="Describe what was delivered and when"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  disabled={!fulfillmentNotes[order.id]?.trim()}
+                                  onClick={() => markAsFulfilled(order.id)}
+                                >
+                                  Mark fulfilled
+                                </button>
+                              </>
+                            ) : null}
+                            <button type="button" disabled={!canReject} className="danger" onClick={() => rejectOrder(order)}>
                               × Reject (refund coins)
                             </button>
+                            {status === "issued" ? <p>Grant issued; reject and refund are locked.</p> : null}
                           </div>
                         </article>
                       );
