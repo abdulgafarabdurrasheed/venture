@@ -331,6 +331,7 @@ app.get("/api/user/dashboard", requireUser, async (req, res) => {
 app.get("/api/notifications", requireUser, async (req, res) => {
   try {
     const notifications = await getUnreadNotifications(req.session.userId);
+    res.setHeader("Cache-Control", "no-store");
     res.json(notifications);
   } catch (error) {
     console.error("Failed to load notifications:", error);
