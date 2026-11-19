@@ -2155,6 +2155,21 @@ export async function awardStarsToProject(adminId, projectId, stars) {
     }
 
     await client.query("COMMIT");
+    if (starDiff > 0) {
+      await insertNotification(
+        project.user_id,
+        "project_stars_updated",
+        `Your project "${project.name}" received ${starDiff} additional star${starDiff === 1 ? "" : "s"}.`,
+        { projectId: Number(project.id), stars, starsAdded: starDiff }
+      );
+    } else if (starDiff < 0) {
+      await insertNotification(
+        project.user_id,
+        "project_stars_updated",
+        `The star rating for "${project.name}" changed from ${project.stars} to ${stars}.`,
+        { projectId: Number(project.id), stars, starsChanged: starDiff }
+      );
+    }
     return toPublicProject(updatedProjectResult.rows[0]);
   } catch (error) {
     await client.query("ROLLBACK");
