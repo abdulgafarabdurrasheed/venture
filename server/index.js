@@ -191,15 +191,60 @@ async function requireStaffReview(req, res, next) {
 
   try {
     const row = await getUserById(userId);
-    if (!canAccessStaffReview(effectiveRole(row))) {
+    const role = effectiveRole(row);
+    if (!canAccessStaffReview(role)) {
       res.status(403).json({ error: "Staff review access only." });
       return;
+    }
+    req.staffReviewRole = role;
+    if (role === "reviewer") {
+      const sendJson = res.json.bind(res);
+      res.json = (payload) => sendJson(scopeReviewerResponse(payload));
     }
     next();
   } catch (error) {
     console.error("[review] auth check failed:", error);
     res.status(500).json({ error: "Failed to verify review access." });
   }
+}
+
+const REVIEWER_SENSITIVE_FIELDS = new Set([
+  "email",
+  "user_email",
+  "birthday",
+  "birthdate",
+  "address",
+  "grantIdentity",
+  "grant_identity",
+  "rawProfile",
+  "raw_profile",
+  "rawToken",
+  "raw_token",
+  "accessToken",
+  "access_token",
+  "refreshToken",
+  "refresh_token",
+  "tokenExpiresAt",
+  "token_expires_at",
+  "expiresInSeconds",
+  "expires_in_seconds",
+  "tokenType",
+  "token_type",
+]);
+
+function scopeReviewerResponse(value) {
+  if (Array.isArray(value)) return value.map(scopeReviewerResponse);
+  if (!value || typeof value !== "object") return value;
+  if (value instanceof Date) return value;
+
+  const scoped = {};
+  for (const [key, child] of Object.entries(value)) {
+    // Match Horizons/Pixl's reviewer projection and withhold participant
+    // contact, grant identity, and credential fields wherever they appear.
+    if (REVIEWER_SENSITIVE_FIELDS.has(key)) continue;
+    scoped[key] = scopeReviewerResponse(child);
+  }
+  return scoped;
 }
 
 async function requireSuperAdmin(req, res, next) {
@@ -314,7 +359,8 @@ app.post("/api/shop/items/:id/buy", requireUser, async (req, res) => {
     res.json({ purchase });
   } catch (error) {
     console.error("Failed to buy shop item:", error);
-    res.status(400).json({ error: error.message || "Failed to buy shop item." });
+    const status = error.code === "GRANT_ADDRESS_REQUIRED" ? 409 : 400;
+    res.status(status).json({ error: error.message || "Failed to buy shop item.", code: error.code });
   }
 });
 

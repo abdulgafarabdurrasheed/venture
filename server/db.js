@@ -34,6 +34,14 @@ function stripSslParamsFromUrl(urlString) {
   return `${protocol}${parsed.toString().slice("postgres:".length)}`;
 }
 
+function verifiedExternalSslConfig() {
+  const ca = process.env.DATABASE_SSL_CA?.replaceAll("\\n", "\n").trim();
+  return {
+    rejectUnauthorized: true,
+    ...(ca ? { ca } : {}),
+  };
+}
+
 function resolvePoolConfig(urlString) {
   const parsed = parseDatabaseUrl(urlString);
   const hostname = parsed?.hostname ?? "";
@@ -51,35 +59,24 @@ function resolvePoolConfig(urlString) {
 
   const urlSslMode = parsed?.searchParams.get("sslmode")?.toLowerCase();
   const envSslMode = process.env.PGSSLMODE?.toLowerCase();
-
-  if (envSslMode === "disable" || urlSslMode === "disable") {
-    return { connectionString: urlString, ssl: false, internal, hostname };
+  const disableRequested = envSslMode === "disable" || urlSslMode === "disable";
+  if (disableRequested && process.env.NODE_ENV === "production") {
+    throw new Error("TLS cannot be disabled for an external Postgres database in production.");
+  }
+  if (envSslMode === "no-verify" || urlSslMode === "no-verify") {
+    console.warn("[db] PGSSLMODE=no-verify is deprecated; certificate verification is enforced.");
   }
 
-  if (
-    envSslMode === "require" ||
-    envSslMode === "no-verify" ||
-    urlSslMode === "require" ||
-    urlSslMode === "no-verify"
-  ) {
-    return {
-      connectionString: urlString,
-      ssl: { rejectUnauthorized: false },
-      internal,
-      hostname,
-    };
+  if (disableRequested) {
+    return { connectionString: stripSslParamsFromUrl(urlString), ssl: false, internal, hostname };
   }
 
-  if (process.env.NODE_ENV === "production" && hostname.includes(".")) {
-    return {
-      connectionString: urlString,
-      ssl: { rejectUnauthorized: false },
-      internal,
-      hostname,
-    };
-  }
-
-  return { connectionString: urlString, ssl: false, internal, hostname };
+  return {
+    connectionString: stripSslParamsFromUrl(urlString),
+    ssl: verifiedExternalSslConfig(),
+    internal,
+    hostname,
+  };
 }
 
 const poolConfig = resolvePoolConfig(rawConnectionString);

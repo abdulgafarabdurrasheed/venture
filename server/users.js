@@ -3,6 +3,16 @@ import { getDefaultDevEmail } from "./env.js";
 import { slackDisplayNameFromProfile } from "./hackclubAuth.js";
 
 const DEFAULT_ROLE = "member";
+const LEGACY_SENSITIVE_USER_COLUMNS = [
+  "access_token",
+  "refresh_token",
+  "token_type",
+  "token_expires_at",
+  "expires_in_seconds",
+  "scope",
+  "raw_token",
+  "raw_profile",
+];
 
 function parseEmailList(value) {
   return (value || "")
@@ -38,14 +48,7 @@ export async function ensureUsersTable() {
       role TEXT NOT NULL DEFAULT '${DEFAULT_ROLE}',
       coins NUMERIC(10, 2) NOT NULL DEFAULT 0,
       total_stars INTEGER NOT NULL DEFAULT 0,
-      access_token TEXT,
-      refresh_token TEXT,
-      token_type TEXT,
-      token_expires_at TIMESTAMPTZ,
-      expires_in_seconds INTEGER,
-      scope TEXT,
-      raw_profile JSONB,
-      raw_token JSONB,
+      grant_identity JSONB,
       hackatime_user_id TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -64,14 +67,7 @@ export async function ensureUsersTable() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS coins NUMERIC(10, 2) NOT NULL DEFAULT 0`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS total_stars INTEGER NOT NULL DEFAULT 0`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS access_token TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_type TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMPTZ`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_in_seconds INTEGER`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS scope TEXT`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS raw_profile JSONB`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS raw_token JSONB`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS grant_identity JSONB`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hackatime_access_token TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hackatime_refresh_token TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hackatime_token_expires_at TIMESTAMPTZ`);
@@ -81,6 +77,7 @@ export async function ensureUsersTable() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hackatime_github_username TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
+  await migrateLegacySensitiveUserData();
   await pool.query(`ALTER TABLE users ALTER COLUMN created_at SET DEFAULT NOW()`);
   await pool.query(`ALTER TABLE users ALTER COLUMN updated_at SET DEFAULT NOW()`);
   await pool.query(`UPDATE users SET created_at = NOW() WHERE created_at IS NULL`);
@@ -140,6 +137,35 @@ export async function ensureUsersTable() {
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_hackclub_sub_unique ON users (hackclub_sub)
   `);
+}
+
+async function migrateLegacySensitiveUserData() {
+  const result = await pool.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'users'
+  `);
+  const columns = new Set(result.rows.map((row) => row.column_name));
+
+  if (columns.has("raw_profile")) {
+    const legacyRows = await pool.query(`
+      SELECT id, raw_profile
+      FROM users
+      WHERE raw_profile IS NOT NULL AND grant_identity IS NULL
+    `);
+    for (const row of legacyRows.rows) {
+      const grantIdentity = normalizeGrantIdentity(parseRawProfile(row.raw_profile));
+      if (!grantIdentity) continue;
+      await pool.query("UPDATE users SET grant_identity = $1::jsonb WHERE id = $2", [
+        JSON.stringify(grantIdentity),
+        row.id,
+      ]);
+    }
+  }
+
+  for (const column of LEGACY_SENSITIVE_USER_COLUMNS) {
+    await pool.query(`ALTER TABLE users DROP COLUMN IF EXISTS ${column}`);
+  }
 }
 
 export function resolveRole(email) {
@@ -256,9 +282,10 @@ function profileEmail(profile) {
 }
 
 /**
- * Persists token response + profile for a Hack Club user (insert or update).
+ * Persists the minimum account fields Off-Track uses. OAuth token material is
+ * intentionally consumed only by the callback and never stored.
  */
-export async function upsertUserFromHackClub({ profile, token }) {
+export async function upsertUserFromHackClub({ profile }) {
   if (!pool) {
     throw new Error("DATABASE_URL is not set.");
   }
@@ -276,17 +303,12 @@ export async function upsertUserFromHackClub({ profile, token }) {
   const profileImageUrl = profile.profile_image_url ?? profile.picture ?? profile.avatar_url ?? null;
   const slackId = profile.slack_id ?? profile.slack_user_id ?? profile.slackId ?? null;
   const verificationStatus = profile.verification_status ?? profile.verification ?? null;
-
-  const accessToken = token.access_token ?? null;
-  const refreshToken = token.refresh_token ?? null;
-  const tokenType = token.token_type ?? null;
-  const expiresIn = typeof token.expires_in === "number" ? token.expires_in : null;
-  const scope = token.scope ?? null;
-
-  let tokenExpiresAt = null;
-  if (expiresIn) {
-    tokenExpiresAt = new Date(Date.now() + expiresIn * 1000);
-  }
+  // Keep names available for grant records, but collect date of birth and
+  // mailing address only after a participant starts a grant checkout.
+  const grantIdentity = normalizeGrantIdentity(profile, {
+    includeBirthdate: false,
+    includeAddress: false,
+  });
 
   const role = resolveRole(email);
 
@@ -301,19 +323,10 @@ export async function upsertUserFromHackClub({ profile, token }) {
       slack_id,
       verification_status,
       role,
-      access_token,
-      refresh_token,
-      token_type,
-      token_expires_at,
-      expires_in_seconds,
-      scope,
-      raw_profile,
-      raw_token,
+      grant_identity,
       created_at,
       updated_at
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW()
-    )
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW(), NOW())
     ON CONFLICT (hackclub_sub) DO UPDATE SET
       email = COALESCE(EXCLUDED.email, users.email),
       name = COALESCE(EXCLUDED.name, users.name),
@@ -322,16 +335,33 @@ export async function upsertUserFromHackClub({ profile, token }) {
       slack_id = COALESCE(EXCLUDED.slack_id, users.slack_id),
       verification_status = COALESCE(EXCLUDED.verification_status, users.verification_status),
       role = EXCLUDED.role,
-      access_token = EXCLUDED.access_token,
-      refresh_token = EXCLUDED.refresh_token,
-      token_type = EXCLUDED.token_type,
-      token_expires_at = EXCLUDED.token_expires_at,
-      expires_in_seconds = EXCLUDED.expires_in_seconds,
-      scope = EXCLUDED.scope,
-      raw_profile = EXCLUDED.raw_profile,
-      raw_token = EXCLUDED.raw_token,
+      grant_identity = CASE
+        WHEN EXCLUDED.grant_identity IS NULL THEN users.grant_identity
+        ELSE jsonb_set(
+          jsonb_set(
+            EXCLUDED.grant_identity,
+            '{identity,birthdate}',
+            COALESCE(
+              NULLIF(EXCLUDED.grant_identity #> '{identity,birthdate}', 'null'::jsonb),
+              users.grant_identity #> '{identity,birthdate}',
+              'null'::jsonb
+            ),
+            true
+          ),
+          '{identity,address}',
+          COALESCE(
+            NULLIF(EXCLUDED.grant_identity #> '{identity,address}', 'null'::jsonb),
+            users.grant_identity #> '{identity,address}',
+            'null'::jsonb
+          ),
+          true
+        )
+      END,
       updated_at = NOW()
-    RETURNING *
+    RETURNING id, hackclub_sub, email, name, slug, profile_image_url, slack_id,
+      verification_status, role, coins, total_stars, created_at, updated_at,
+      (hackatime_access_token IS NOT NULL) AS hackatime_connected,
+      hackatime_user_id, hackatime_github_username, hackatime_total_hours
     `,
     [
       hackclubSub,
@@ -342,18 +372,50 @@ export async function upsertUserFromHackClub({ profile, token }) {
       slackId,
       verificationStatus,
       role,
-      accessToken,
-      refreshToken,
-      tokenType,
-      tokenExpiresAt,
-      expiresIn,
-      scope,
-      JSON.stringify(profile ?? {}),
-      JSON.stringify(token ?? {}),
+      grantIdentity ? JSON.stringify(grantIdentity) : null,
     ]
   );
 
   return result.rows[0];
+}
+
+export function grantIdentityHasCompleteAddress(grantIdentity) {
+  const address = grantIdentity?.identity?.address;
+  return Boolean(address?.line_1 && address?.city && address?.country && address?.zip);
+}
+
+export async function updateGrantIdentityFromHackClub(userId, profile) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+  const grantIdentity = normalizeGrantIdentity(profile);
+  if (!grantIdentityHasCompleteAddress(grantIdentity)) return false;
+
+  const result = await pool.query(
+    `
+      UPDATE users
+      SET grant_identity = jsonb_build_object(
+            'identity', jsonb_build_object(
+              'first_name', COALESCE(
+                NULLIF($1::jsonb #> '{identity,first_name}', 'null'::jsonb),
+                NULLIF(users.grant_identity #> '{identity,first_name}', 'null'::jsonb)
+              ),
+              'last_name', COALESCE(
+                NULLIF($1::jsonb #> '{identity,last_name}', 'null'::jsonb),
+                NULLIF(users.grant_identity #> '{identity,last_name}', 'null'::jsonb)
+              ),
+              'birthdate', COALESCE(
+                NULLIF($1::jsonb #> '{identity,birthdate}', 'null'::jsonb),
+                NULLIF(users.grant_identity #> '{identity,birthdate}', 'null'::jsonb)
+              ),
+              'address', $1::jsonb #> '{identity,address}'
+            )
+          ),
+          updated_at = NOW()
+      WHERE id = $2
+      RETURNING id
+    `,
+    [JSON.stringify(grantIdentity), userId]
+  );
+  return result.rowCount > 0;
 }
 
 /** Local dev login — never available in production. */
@@ -367,13 +429,6 @@ export async function upsertDevUser({ email, name }) {
   const displayName = typeof name === "string" && name.trim() ? name.trim() : "Dev User";
   const hackclubSub = `dev:${normalizedEmail}`;
   const role = resolveRole(normalizedEmail);
-  const profile = {
-    email: normalizedEmail,
-    name: displayName,
-    sub: hackclubSub,
-    verification_status: "dev",
-  };
-
   const result = await pool.query(
     `
     INSERT INTO users (
@@ -383,21 +438,22 @@ export async function upsertDevUser({ email, name }) {
       slug,
       verification_status,
       role,
-      raw_profile,
       created_at,
       updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+    ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
     ON CONFLICT (hackclub_sub) DO UPDATE SET
       email = EXCLUDED.email,
       name = EXCLUDED.name,
       slug = EXCLUDED.slug,
       verification_status = EXCLUDED.verification_status,
       role = EXCLUDED.role,
-      raw_profile = EXCLUDED.raw_profile,
       updated_at = NOW()
-    RETURNING *
+    RETURNING id, hackclub_sub, email, name, slug, profile_image_url, slack_id,
+      verification_status, role, coins, total_stars, created_at, updated_at,
+      (hackatime_access_token IS NOT NULL) AS hackatime_connected,
+      hackatime_user_id, hackatime_github_username, hackatime_total_hours
     `,
-    [hackclubSub, normalizedEmail, displayName, normalizedEmail.split("@")[0], "dev", role, JSON.stringify(profile)]
+    [hackclubSub, normalizedEmail, displayName, normalizedEmail.split("@")[0], "dev", role]
   );
 
   return result.rows[0];
@@ -408,7 +464,18 @@ export async function getUserById(id) {
     throw new Error("DATABASE_URL is not set.");
   }
 
-  const result = await pool.query(`SELECT * FROM users WHERE id = $1`, [id]);
+  const result = await pool.query(
+    `
+      SELECT
+        id, hackclub_sub, email, name, slug, profile_image_url, slack_id,
+        verification_status, role, coins, total_stars, created_at, updated_at,
+        (hackatime_access_token IS NOT NULL) AS hackatime_connected,
+        hackatime_user_id, hackatime_github_username, hackatime_total_hours
+      FROM users
+      WHERE id = $1
+    `,
+    [id]
+  );
   return result.rows[0] ?? null;
 }
 
@@ -522,7 +589,11 @@ export async function getUserByEmail(email) {
   const normalizedEmail = normalizeEmail(email);
   const result = await pool.query(
     `
-      SELECT *
+      SELECT
+        id, hackclub_sub, email, name, slug, profile_image_url, slack_id,
+        verification_status, role, coins, total_stars, created_at, updated_at,
+        (hackatime_access_token IS NOT NULL) AS hackatime_connected,
+        hackatime_user_id, hackatime_github_username, hackatime_total_hours
       FROM users
       WHERE lower(email) = $1
       ORDER BY id ASC
@@ -547,7 +618,10 @@ export async function updateUserRoleFromEmail(id, email) {
         role = $2,
         updated_at = NOW()
       WHERE id = $3
-      RETURNING *
+      RETURNING id, hackclub_sub, email, name, slug, profile_image_url, slack_id,
+        verification_status, role, coins, total_stars, created_at, updated_at,
+        (hackatime_access_token IS NOT NULL) AS hackatime_connected,
+        hackatime_user_id, hackatime_github_username, hackatime_total_hours
     `,
     [normalizeEmail(email), resolveRole(email), id]
   );
@@ -566,12 +640,42 @@ function parseRawProfile(raw) {
   }
 }
 
+function normalizeGrantIdentity(profile, { includeBirthdate = true, includeAddress = true } = {}) {
+  if (!profile || typeof profile !== "object") return null;
+  const identity = profile.identity && typeof profile.identity === "object" ? profile.identity : profile;
+  const addresses = Array.isArray(identity.addresses) ? identity.addresses : [];
+  const address = includeAddress
+    ? identity.address ?? addresses.find((entry) => entry?.primary) ?? addresses[0] ?? {}
+    : {};
+  const addressObject = typeof address === "string" ? { street_address: address } : address && typeof address === "object" ? address : {};
+  const clean = (value) => (typeof value === "string" && value.trim() ? value.trim() : null);
+  const normalizedAddress = {
+    line_1: clean(addressObject.line_1 ?? addressObject.line1 ?? addressObject.street_address ?? addressObject.street),
+    line_2: clean(addressObject.line_2 ?? addressObject.line2 ?? addressObject.street2),
+    city: clean(addressObject.city ?? addressObject.locality),
+    state: clean(addressObject.state ?? addressObject.region ?? addressObject.province),
+    country: clean(addressObject.country ?? addressObject.country_name),
+    zip: clean(addressObject.zip ?? addressObject.postal_code ?? addressObject.postcode),
+  };
+  const fields = {
+    first_name: clean(identity.first_name ?? identity.firstName ?? identity.given_name),
+    last_name: clean(identity.last_name ?? identity.lastName ?? identity.family_name),
+    birthdate: includeBirthdate ? clean(identity.birthdate ?? identity.birthday ?? identity.dob) : null,
+    address: includeAddress && Object.values(normalizedAddress).some(Boolean) ? normalizedAddress : null,
+  };
+  const hasIdentityData = Boolean(
+    fields.first_name ||
+      fields.last_name ||
+      fields.birthdate ||
+      fields.address
+  );
+  return hasIdentityData ? { identity: fields } : null;
+}
+
 function publicDisplayNameFromUserRow(row) {
   if (!row) return null;
   const slug = typeof row.slug === "string" ? row.slug.trim() : "";
   if (slug) return slug;
-  const fromProfile = slackDisplayNameFromProfile(parseRawProfile(row.raw_profile));
-  if (fromProfile) return fromProfile;
   const name = typeof row.name === "string" ? row.name.trim() : "";
   if (name) return name;
   const email = typeof row.email === "string" ? row.email : "";
@@ -589,7 +693,7 @@ export function toPublicUser(row, { loggedHours = 0 } = {}) {
     profileImageUrl: row.profile_image_url,
     role: effectiveRole(row),
     coins: Number(row.coins ?? 0),
-    hackatimeConnected: Boolean(row.hackatime_access_token),
+    hackatimeConnected: Boolean(row.hackatime_connected ?? row.hackatimeConnected ?? row.hackatime_access_token),
     hackatimeTotalHours: Number(row.hackatime_total_hours ?? 0),
     loggedHours: Number(loggedHours ?? 0),
   };

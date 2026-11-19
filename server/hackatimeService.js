@@ -12,7 +12,7 @@ import { refreshHackatimeGithubUsernameForUser } from "./hackatimeGithubUsername
 import { syncAllProjectHoursForUser } from "./projects.js";
 
 export function isHackatimeConnected(row) {
-  return Boolean(row?.hackatime_access_token);
+  return Boolean(row?.hackatime_connected ?? row?.hackatimeConnected ?? row?.hackatime_access_token);
 }
 
 export async function saveHackatimeTokensForUser(userId, token) {
@@ -36,7 +36,7 @@ export async function saveHackatimeTokensForUser(userId, token) {
         hackatime_connected_at = COALESCE(hackatime_connected_at, NOW()),
         updated_at = NOW()
       WHERE id = $4
-      RETURNING *
+      RETURNING id
     `,
     [accessToken, refreshToken, tokenExpiresAt, userId]
   );
@@ -78,7 +78,10 @@ export async function refreshUserHackatimeCache(userId, accessToken) {
   await syncAllProjectHoursForUser(userId, stackProjects);
 
   const userRow = (
-    await pool.query(`SELECT * FROM users WHERE id = $1`, [userId])
+    await pool.query(
+      `SELECT email, name, slug, slack_id, role, hackatime_total_hours FROM users WHERE id = $1`,
+      [userId]
+    )
   ).rows[0];
 
   if (userRow) {

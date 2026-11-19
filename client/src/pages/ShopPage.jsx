@@ -46,6 +46,33 @@ export function ShopPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (state.loading || state.error) return;
+    const params = new URLSearchParams(window.location.search);
+    const addressResult = params.get("grant_address");
+    const itemId = params.get("item");
+    const messages = {
+      connected: "Hack Club address connected. Review the grant and submit your request.",
+      incomplete: "Hack Club did not return a complete mailing address. Check your Hack Club account and retry.",
+      identity_mismatch: "The connected Hack Club account does not match your Off-Track account.",
+      login_required: "Your Off-Track session expired. Sign in again, then reconnect your address.",
+      cancelled: "Address connection was cancelled. You can retry from the grant form.",
+      unavailable: "Address connection is unavailable right now. Please try again later.",
+      error: "Address connection failed. Please try again.",
+    };
+    if (addressResult && messages[addressResult]) setPurchaseMessage(messages[addressResult]);
+    if (itemId) {
+      const item = state.items.find((entry) => String(entry.id) === itemId);
+      if (item) setSelectedItem(item);
+    }
+    if (addressResult || itemId) {
+      params.delete("grant_address");
+      params.delete("item");
+      const query = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+    }
+  }, [state.error, state.items, state.loading]);
+
   const pageCount = Math.max(1, Math.ceil(state.items.length / ITEMS_PER_PAGE));
 
   const visibleItems = useMemo(() => {
