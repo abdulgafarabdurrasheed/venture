@@ -2,6 +2,7 @@ import { persistOrderAirtableRecordId, syncShopOrderToAirtable } from "./airtabl
 import { MIN_PURCHASE_USD, usdToCoins } from "./coinRates.js";
 import { pool } from "./db.js";
 import { normalizeShopLabelColor, shopLabelColorHex } from "./shopLabelColors.js";
+import { grantIdentityHasCompleteAddress } from "./users.js";
 
 const SHOP_ITEM_COLUMNS = [
   "name",
@@ -410,9 +411,14 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
     const item = itemResult.rows[0];
     if (!item) throw new Error("Shop item not found.");
 
-    const currentUserResult = await client.query("SELECT total_stars, coins FROM users WHERE id = $1", [userId]);
+    const currentUserResult = await client.query("SELECT total_stars, coins, grant_identity FROM users WHERE id = $1", [userId]);
     const user = currentUserResult.rows[0];
     if (!user) throw new Error("User not found.");
+    if (!grantIdentityHasCompleteAddress(user.grant_identity)) {
+      const error = new Error("Connect your complete Hack Club mailing address before submitting a grant request.");
+      error.code = "GRANT_ADDRESS_REQUIRED";
+      throw error;
+    }
 
     if (item.required_stars > 0 && user.total_stars < item.required_stars) {
       throw new Error(`This item requires ${item.required_stars} star(s) to unlock. You have ${user.total_stars}.`);

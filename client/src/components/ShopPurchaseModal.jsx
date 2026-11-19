@@ -32,6 +32,7 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [acknowledgments, setAcknowledgments] = useState(emptyAcknowledgments);
+  const [needsGrantAddress, setNeedsGrantAddress] = useState(false);
 
   useEffect(() => {
     setAmountUsd("");
@@ -40,6 +41,7 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
     setSubmitting(false);
     setShowConfirm(false);
     setAcknowledgments(emptyAcknowledgments());
+    setNeedsGrantAddress(false);
   }, [item?.id]);
 
   useEffect(() => {
@@ -96,7 +98,10 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
         body: JSON.stringify({ amountUsd: parsedUsd, itemUsage: itemUsage.trim() }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Failed to buy item.");
+      if (!response.ok) {
+        if (data.code === "GRANT_ADDRESS_REQUIRED") setNeedsGrantAddress(true);
+        throw new Error(data.error || "Failed to buy item.");
+      }
 
       await onPurchased?.(data.purchase);
       onClose?.();
@@ -192,6 +197,23 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
           <p className="shop-modal__warning">Describe what you will buy with this grant before purchasing.</p>
         ) : null}
         {message ? <p className="shop-modal__warning">{message}</p> : null}
+        {needsGrantAddress ? (
+          <>
+            <p className="shop-modal__warning">
+              Hack Club will share your name, date of birth, and mailing address with Off-Track to prepare your grant request.
+            </p>
+            <button
+              type="button"
+              className="shop-modal__buy"
+              onClick={() => {
+                const returnTo = `/shop?item=${encodeURIComponent(item.id)}`;
+                window.location.assign(`/api/auth/hackclub/grant-address?returnTo=${encodeURIComponent(returnTo)}`);
+              }}
+            >
+              Connect grant details with Hack Club
+            </button>
+          </>
+        ) : null}
 
         <button
           type="button"
