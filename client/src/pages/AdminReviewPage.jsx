@@ -277,6 +277,8 @@ function AdminReviewIndex() {
 function AdminReviewDetail({ projectId }) {
   const { user } = useAuth();
   const [project, setProject] = useState(null);
+  const [starsDraft, setStarsDraft] = useState("0");
+  const [starsSaving, setStarsSaving] = useState(false);
   const [journalEntries, setJournalEntries] = useState([]);
   const [approvedHours, setApprovedHours] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -305,6 +307,7 @@ function AdminReviewDetail({ projectId }) {
       const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.error || "Failed to load project.");
       setProject(data.project);
+      setStarsDraft(String(Number(data.project?.stars ?? 0)));
       setJournalEntries(data.journalEntries || []);
       setApprovedHours("");
       setReducedApprovedHours("");
@@ -313,6 +316,40 @@ function AdminReviewDetail({ projectId }) {
     } catch (err) {
       setMessage(err.message);
       setStatus("");
+    }
+  }
+
+  async function saveProjectStars() {
+    if (!project) return;
+    const stars = Number(starsDraft);
+    if (!Number.isInteger(stars) || stars < 0 || stars > 5) {
+      setMessage("Choose a project star rating from 0 to 5.");
+      return;
+    }
+    const currentStars = Number(project.stars ?? 0);
+    if (stars === currentStars) return;
+    if (stars < currentStars && !window.confirm("Lowering this rating may remove shop unlock stars from the participant. Continue?")) {
+      return;
+    }
+
+    setStarsSaving(true);
+    setMessage("");
+    try {
+      const response = await apiFetch(`/api/admin/review/projects/${project.id}/star`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stars }),
+      });
+      const data = await readJsonResponse(response);
+      if (!response.ok) throw new Error(data.error || "Failed to update project stars.");
+      setProject((current) => ({ ...current, ...data.project }));
+      setStarsDraft(String(Number(data.project?.stars ?? stars)));
+      setMessage("Project stars updated. Shop unlock access now reflects this rating.");
+    } catch (err) {
+      setMessage(err.message || "Failed to update project stars.");
+    } finally {
+      setStarsSaving(false);
     }
   }
 
@@ -669,6 +706,32 @@ function AdminReviewDetail({ projectId }) {
               Joe (no Slack ID)
             </span>
           )}
+        </section>
+
+        <section className="admin-review-panel admin-review-stars-panel" aria-label="Project star award">
+          <div className="admin-review-stars-heading">
+            <h2>Project stars</h2>
+            <strong>{Number(project.stars ?? 0)} / 5</strong>
+          </div>
+          <p>Each project star counts toward the participant&apos;s shop unlock balance.</p>
+          <div className="admin-review-stars-controls">
+            <label>
+              Rating
+              <select value={starsDraft} disabled={starsSaving} onChange={(event) => setStarsDraft(event.target.value)}>
+                {[0, 1, 2, 3, 4, 5].map((value) => (
+                  <option value={value} key={value}>{value} star{value === 1 ? "" : "s"}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="admin-review-submit"
+              type="button"
+              disabled={starsSaving || Number(starsDraft) === Number(project.stars ?? 0)}
+              onClick={saveProjectStars}
+            >
+              {starsSaving ? "Saving…" : "Save stars"}
+            </button>
+          </div>
         </section>
 
         {(project.shipKind === "reship" || project.status === "pending-reship") && project.reshipUpdate ? (

@@ -589,6 +589,7 @@ export function toPublicUser(row, { loggedHours = 0 } = {}) {
     profileImageUrl: row.profile_image_url,
     role: effectiveRole(row),
     coins: Number(row.coins ?? 0),
+    totalStars: Number(row.total_stars ?? 0),
     hackatimeConnected: Boolean(row.hackatime_access_token),
     hackatimeTotalHours: Number(row.hackatime_total_hours ?? 0),
     loggedHours: Number(loggedHours ?? 0),
@@ -607,6 +608,7 @@ export function toPublicUserFromSessionSnapshot(snapshot) {
     profileImageUrl: snapshot.profileImageUrl ?? null,
     role: snapshot.role ?? DEFAULT_ROLE,
     coins: Number(snapshot.coins ?? 0),
+    totalStars: Number(snapshot.totalStars ?? 0),
     hackatimeTotalHours: Number(snapshot.hackatimeTotalHours ?? 0),
     loggedHours: Number(snapshot.loggedHours ?? 0),
   };
@@ -631,6 +633,7 @@ export function buildSessionProfileSnapshot(profile, { userRow = null } = {}) {
       profile.verification_status ?? profile.verification ?? userRow?.verification_status ?? null,
     role: userRow ? effectiveRole(userRow) : resolveRole(email),
     coins: userRow ? Number(userRow.coins ?? 0) : 0,
+    totalStars: userRow ? Number(userRow.total_stars ?? 0) : 0,
     hackatimeTotalHours: userRow ? Number(userRow.hackatime_total_hours ?? 0) : 0,
   };
 }
