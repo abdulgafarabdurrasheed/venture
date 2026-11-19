@@ -1,45 +1,47 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "../api/client.js";
-import {
-  COINS_PER_APPROVED_HOUR,
-  COINS_PER_USD,
-  MIN_PURCHASE_USD,
-  USD_PER_APPROVED_HOUR,
-  formatCoins,
-  formatUsd,
-  parsePurchaseUsd,
-  usdToCoins,
-} from "../constants/coinRates.js";
+import { formatCoins, formatUsd } from "../constants/coinRates.js";
 import { resolveShopItemImage } from "../utils/shopItemImages.js";
 import "./ShopPurchaseModal.css";
 
-const GRANT_ACKNOWLEDGMENTS = [
-  "I acknowledge that by receiving this grant I will be issued an HCB prepaid card, which may only be used for the purchase of the specified item(s) for the purpose of my own travel.",
-  "I confirm that all expenses made with this grant are strictly for personal use and may not be used to cover costs for other individuals, including friends, family members, or any third parties.",
-  "I understand that any violation of these rules may result in permanent removal from the Hack Club ecosystem and may be treated as fraudulent activity.",
-  "I understand that Hack Club is not responsible for any aspect of my travel, safety, or experiences, and that this grant solely provides financial support for my adventure.",
-];
-
-function emptyAcknowledgments() {
-  return Object.fromEntries(GRANT_ACKNOWLEDGMENTS.map((_, index) => [index, false]));
+function emptyAcknowledgments(entries = []) {
+  return Object.fromEntries(entries.map(({ id }) => [id, false]));
 }
 
 export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
-  const [amountUsd, setAmountUsd] = useState("");
   const [itemUsage, setItemUsage] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [acknowledgments, setAcknowledgments] = useState(emptyAcknowledgments);
+  const [grantTerms, setGrantTerms] = useState({ loading: true, version: "", acknowledgments: [], error: "" });
+  const [acknowledgments, setAcknowledgments] = useState({});
 
   useEffect(() => {
-    setAmountUsd("");
     setItemUsage("");
     setMessage("");
     setSubmitting(false);
     setShowConfirm(false);
-    setAcknowledgments(emptyAcknowledgments());
+    setAcknowledgments({});
+
+    if (!item?.id) return undefined;
+    let cancelled = false;
+    setGrantTerms({ loading: true, version: "", acknowledgments: [], error: "" });
+    apiFetch("/api/shop/grant-terms", { credentials: "include" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not load grant terms.");
+        if (cancelled) return;
+        const entries = Array.isArray(data.acknowledgments) ? data.acknowledgments : [];
+        setGrantTerms({ loading: false, version: data.version || "", acknowledgments: entries, error: "" });
+        setAcknowledgments(emptyAcknowledgments(entries));
+      })
+      .catch((error) => {
+        if (!cancelled) setGrantTerms({ loading: false, version: "", acknowledgments: [], error: error.message });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [item?.id]);
 
   useEffect(() => {
@@ -47,7 +49,7 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
       if (event.key !== "Escape") return;
       if (showConfirm) {
         setShowConfirm(false);
-        setAcknowledgments(emptyAcknowledgments());
+        setAcknowledgments(emptyAcknowledgments(grantTerms.acknowledgments));
         return;
       }
       onClose?.();
@@ -55,20 +57,19 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [onClose, showConfirm]);
+  }, [grantTerms.acknowledgments, onClose, showConfirm]);
 
   if (!item) return null;
 
-  const parsedUsd = parsePurchaseUsd(amountUsd);
-  const hasValidUsd = parsedUsd !== null;
-  const totalCoins = hasValidUsd ? usdToCoins(parsedUsd) : null;
-  const belowMinimum =
-    amountUsd !== "" && Number.isFinite(Number(amountUsd)) && Number(amountUsd) < MIN_PURCHASE_USD;
+  const amountUsd = Number(item.priceUsd);
+  const totalCoins = Number(item.price);
+  const hasFixedPrice = Number.isFinite(amountUsd) && amountUsd > 0 && Number.isFinite(totalCoins) && totalCoins > 0;
   const availableCoins = Number(userCoins) || 0;
-  const hasEnoughCoins = totalCoins !== null && availableCoins >= totalCoins;
+  const hasEnoughCoins = hasFixedPrice && availableCoins >= totalCoins;
   const hasItemUsage = itemUsage.trim().length > 0;
-  const canPurchase = hasEnoughCoins && hasItemUsage && !submitting;
-  const allAcknowledged = GRANT_ACKNOWLEDGMENTS.every((_, index) => acknowledgments[index]);
+  const hasGrantTerms = Boolean(grantTerms.version) && grantTerms.acknowledgments.length > 0;
+  const canPurchase = hasEnoughCoins && hasItemUsage && hasGrantTerms && !grantTerms.loading && !grantTerms.error && !submitting;
+  const allAcknowledged = hasGrantTerms && grantTerms.acknowledgments.every(({ id }) => acknowledgments[id]);
 
   function handleBuyClick() {
     if (!canPurchase) return;
@@ -78,11 +79,11 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
 
   function handleBackFromConfirm() {
     setShowConfirm(false);
-    setAcknowledgments(emptyAcknowledgments());
+    setAcknowledgments(emptyAcknowledgments(grantTerms.acknowledgments));
   }
 
-  function toggleAcknowledgment(index) {
-    setAcknowledgments((current) => ({ ...current, [index]: !current[index] }));
+  function toggleAcknowledgment(id) {
+    setAcknowledgments((current) => ({ ...current, [id]: !current[id] }));
   }
 
   async function handleConfirmPurchase() {
@@ -93,7 +94,11 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
     try {
       const response = await apiFetch(`/api/shop/items/${item.id}/buy`, {
         method: "POST",
-        body: JSON.stringify({ amountUsd: parsedUsd, itemUsage: itemUsage.trim() }),
+        body: JSON.stringify({
+          itemUsage: itemUsage.trim(),
+          grantTermsVersion: grantTerms.version,
+          acknowledgedIds: grantTerms.acknowledgments.filter(({ id }) => acknowledgments[id]).map(({ id }) => id),
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to buy item.");
@@ -103,7 +108,7 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
     } catch (error) {
       setMessage(error.message || "Failed to buy item.");
       setShowConfirm(false);
-      setAcknowledgments(emptyAcknowledgments());
+      setAcknowledgments(emptyAcknowledgments(grantTerms.acknowledgments));
     } finally {
       setSubmitting(false);
     }
@@ -126,10 +131,14 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
         <h2 className="shop-modal__title">{item.name}</h2>
         <p className="shop-modal__description">{item.description || "Travel reward"}</p>
 
-        <p className="shop-modal__rates">
-          Rate: {formatUsd(USD_PER_APPROVED_HOUR)}/approved hour · 1 approved hour = {COINS_PER_APPROVED_HOUR} coins (
-          {COINS_PER_USD} coins per $1)
-        </p>
+        <div className="shop-modal__row">
+          <span>Grant amount</span>
+          <strong>{hasFixedPrice ? formatUsd(amountUsd) : "Not configured"}</strong>
+        </div>
+        <div className="shop-modal__row">
+          <span>Coin cost</span>
+          <strong>{hasFixedPrice ? `${formatCoins(totalCoins)} coins` : "Not configured"}</strong>
+        </div>
 
         {item.maxPerPerson ? (
           <div className="shop-modal__row">
@@ -143,19 +152,6 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
             View item link
           </a>
         ) : null}
-
-        <label className="shop-modal__field">
-          <span>Amount needed ($) — min {formatUsd(MIN_PURCHASE_USD)}</span>
-          <input
-            type="number"
-            min={MIN_PURCHASE_USD}
-            step="0.01"
-            inputMode="decimal"
-            placeholder={MIN_PURCHASE_USD.toFixed(2)}
-            value={amountUsd}
-            onChange={(event) => setAmountUsd(event.target.value)}
-          />
-        </label>
 
         <label className="shop-modal__field">
           <span>What will you specifically buy with this grant? *</span>
@@ -176,21 +172,22 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
 
         <div className="shop-modal__total">
           <span>Coins required</span>
-          <strong>{totalCoins !== null ? `${formatCoins(totalCoins)} coins` : "—"}</strong>
+          <strong>{hasFixedPrice ? `${formatCoins(totalCoins)} coins` : "—"}</strong>
         </div>
 
-        {belowMinimum ? (
-          <p className="shop-modal__warning">Minimum purchase is {formatUsd(MIN_PURCHASE_USD)}.</p>
+        {!hasFixedPrice ? (
+          <p className="shop-modal__warning">This item is unavailable until staff configures its grant amount and coin cost.</p>
         ) : null}
-        {hasValidUsd && !hasEnoughCoins ? (
+        {hasFixedPrice && !hasEnoughCoins ? (
           <p className="shop-modal__warning">
-            Not enough coins. You have {formatCoins(availableCoins)} coins, but {formatUsd(parsedUsd)} requires{" "}
-            {formatCoins(totalCoins)} coins.
+            Not enough coins. You have {formatCoins(availableCoins)} coins, and this item costs {formatCoins(totalCoins)} coins.
           </p>
         ) : null}
-        {hasValidUsd && hasEnoughCoins && !hasItemUsage ? (
+        {hasEnoughCoins && !hasItemUsage ? (
           <p className="shop-modal__warning">Describe what you will buy with this grant before purchasing.</p>
         ) : null}
+        {grantTerms.loading ? <p className="shop-modal__warning">Loading current grant terms…</p> : null}
+        {grantTerms.error ? <p className="shop-modal__warning">{grantTerms.error}</p> : null}
         {message ? <p className="shop-modal__warning">{message}</p> : null}
 
         <button
@@ -217,17 +214,20 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
             >
               <h3 className="shop-modal__confirm-title">Confirm your grant</h3>
               <p className="shop-modal__confirm-intro">
-                Before completing your purchase, please read and acknowledge each statement below.
+                Before submitting your request, please read and acknowledge each statement below.
+              </p>
+              <p className="shop-modal__confirm-intro">
+                Staff review the request and record grant issuance separately. Submitting this order does not issue the grant.
               </p>
 
               <ul className="shop-modal__confirm-list">
-                {GRANT_ACKNOWLEDGMENTS.map((text, index) => (
-                  <li key={text}>
+                {grantTerms.acknowledgments.map(({ id, text }) => (
+                  <li key={id}>
                     <label className="shop-modal__confirm-item">
                       <input
                         type="checkbox"
-                        checked={Boolean(acknowledgments[index])}
-                        onChange={() => toggleAcknowledgment(index)}
+                        checked={Boolean(acknowledgments[id])}
+                        onChange={() => toggleAcknowledgment(id)}
                       />
                       <span>{text}</span>
                     </label>

@@ -5,6 +5,8 @@ export function shopItemPayload(source = {}) {
     name: source.name,
     frameLabel: source.frameLabel ?? "",
     frameLabelColor: source.frameLabelColor || DEFAULT_SHOP_LABEL_COLOR,
+    price: source.price ?? "",
+    priceUsd: source.priceUsd ?? "",
     discountPercent: source.discountPercent ?? "",
     maxPerPerson: source.maxPerPerson ?? "",
     itemLink: source.itemLink ?? "",
