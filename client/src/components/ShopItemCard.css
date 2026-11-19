@@ -106,6 +106,29 @@
   background: #6fa8c4;
 }
 
+.shop-item-card__star-gate {
+  position: absolute;
+  top: 5%;
+  left: 6%;
+  z-index: 4;
+  max-width: 45%;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #3d2914;
+  border-radius: 999px;
+  background: #8c9964;
+  color: #2a1c0e;
+  font-family: var(--font);
+  font-size: clamp(0.55rem, 0.9vw, 0.72rem);
+  font-weight: 800;
+  line-height: 1.1;
+  text-align: center;
+  pointer-events: none;
+}
+
+.shop-item-card__star-gate.is-locked {
+  background: #c99664;
+}
+
 .shop-item-card__item-image {
   position: absolute;
   left: 50%;

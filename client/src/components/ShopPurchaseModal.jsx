@@ -25,7 +25,7 @@ function emptyAcknowledgments() {
   return Object.fromEntries(GRANT_ACKNOWLEDGMENTS.map((_, index) => [index, false]));
 }
 
-export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
+export function ShopPurchaseModal({ item, userCoins, userStars = 0, onClose, onPurchased }) {
   const [amountUsd, setAmountUsd] = useState("");
   const [itemUsage, setItemUsage] = useState("");
   const [message, setMessage] = useState("");
@@ -65,9 +65,12 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
   const belowMinimum =
     amountUsd !== "" && Number.isFinite(Number(amountUsd)) && Number(amountUsd) < MIN_PURCHASE_USD;
   const availableCoins = Number(userCoins) || 0;
+  const availableStars = Number(userStars) || 0;
+  const requiredStars = Number(item.requiredStars) || 0;
+  const hasEnoughStars = availableStars >= requiredStars;
   const hasEnoughCoins = totalCoins !== null && availableCoins >= totalCoins;
   const hasItemUsage = itemUsage.trim().length > 0;
-  const canPurchase = hasEnoughCoins && hasItemUsage && !submitting;
+  const canPurchase = hasEnoughStars && hasEnoughCoins && hasItemUsage && !submitting;
   const allAcknowledged = GRANT_ACKNOWLEDGMENTS.every((_, index) => acknowledgments[index]);
 
   function handleBuyClick() {
@@ -125,6 +128,14 @@ export function ShopPurchaseModal({ item, userCoins, onClose, onPurchased }) {
         <img className="shop-modal__image" src={resolveShopItemImage(item)} alt="" />
         <h2 className="shop-modal__title">{item.name}</h2>
         <p className="shop-modal__description">{item.description || "Travel reward"}</p>
+
+        {requiredStars > 0 ? (
+          <p className="shop-modal__warning">
+            {hasEnoughStars
+              ? `Star unlock met: ${availableStars} available, ${requiredStars} required.`
+              : `This grant requires ${requiredStars} stars. You have ${availableStars}.`}
+          </p>
+        ) : null}
 
         <p className="shop-modal__rates">
           Rate: {formatUsd(USD_PER_APPROVED_HOUR)}/approved hour · 1 approved hour = {COINS_PER_APPROVED_HOUR} coins (
