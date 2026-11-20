@@ -48,6 +48,7 @@ function canFullAdminRole(role) {
 export default function App() {
   const [auth, setAuth] = useState({ status: "loading", user: null });
   const [platform, setPlatform] = useState({ status: "loading", unlocked: true, required: false });
+  const [localAuthMode, setLocalAuthMode] = useState(null);
   const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
   const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
   const isAnyAdminPath = pathname === "/admin" || pathname.startsWith("/admin/");
@@ -85,6 +86,24 @@ export default function App() {
       loadCsrfToken();
     }
   }, [needsPlatformGate, isLocalhost]);
+
+  useEffect(() => {
+    if (!isLocalhost) return undefined;
+
+    let active = true;
+    fetch("/api/auth/mode", { credentials: "include" })
+      .then((response) => response.json())
+      .then((mode) => {
+        if (active) setLocalAuthMode(mode);
+      })
+      .catch(() => {
+        if (active) setLocalAuthMode(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isLocalhost]);
 
   useEffect(() => {
     if (isPublicPath) {
@@ -143,6 +162,13 @@ export default function App() {
   }
 
   if (needsPlatformGate && !auth.user && pathname !== "/login" && !isLocalhost) {
+    const returnTo = `${pathname}${window.location.search}${window.location.hash}`;
+    window.location.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`);
+    return null;
+  }
+
+  const localOAuthRequired = isLocalhost && localAuthMode?.hackClub && !localAuthMode.dev;
+  if (localOAuthRequired && !auth.user && isPlatformPath(pathname) && pathname !== "/login") {
     const returnTo = `${pathname}${window.location.search}${window.location.hash}`;
     window.location.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`);
     return null;
