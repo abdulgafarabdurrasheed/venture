@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PlatformShell } from "../platform/PlatformShell.jsx";
 import "../platform/platform.css";
 
@@ -17,46 +17,54 @@ function normalizeReturnTo(value) {
   return value;
 }
 
-function isLocalDevHost() {
-  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
-}
-
 export function LoginPage() {
+  const [modeError, setModeError] = useState("");
   const params = new URLSearchParams(window.location.search);
   const returnTo = useMemo(() => normalizeReturnTo(params.get("returnTo")), [params]);
   const errorCode = params.get("error");
   const errorMessage = ERROR_MESSAGES[errorCode] || (errorCode ? "Login failed. Please try again." : "");
-  const isLocalDev = isLocalDevHost();
 
   useEffect(() => {
-    if (isLocalDev) {
-      window.location.replace(returnTo);
-      return;
-    }
     if (errorCode) return;
-    const loginUrl = `/api/auth/hackclub/login?returnTo=${encodeURIComponent(returnTo)}`;
-    window.location.replace(loginUrl);
-  }, [errorCode, isLocalDev, returnTo]);
+    let active = true;
 
-  if (isLocalDev) {
-    return (
-      <PlatformShell title="Login">
-        <p>Redirecting to platform…</p>
-      </PlatformShell>
-    );
-  }
+    fetch("/api/auth/mode", { credentials: "include" })
+      .then(async (response) => {
+        const mode = await response.json();
+        if (!response.ok) throw new Error(mode.error || "Could not read login settings.");
+        if (!active) return;
+
+        if (mode.dev) {
+          window.location.replace(returnTo);
+          return;
+        }
+        if (mode.hackClub) {
+          window.location.replace(`/api/auth/hackclub/login?returnTo=${encodeURIComponent(returnTo)}`);
+          return;
+        }
+
+        setModeError("No login method is configured for this environment.");
+      })
+      .catch((error) => {
+        if (active) setModeError(error.message || "Could not read login settings.");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [errorCode, returnTo]);
 
   return (
     <PlatformShell title="Login">
-      {errorMessage ? (
+      {errorMessage || modeError ? (
         <>
-          <p className="platform-gate__error">{errorMessage}</p>
+          <p className="platform-gate__error">{errorMessage || modeError}</p>
           <p>
             <a href={`/login?returnTo=${encodeURIComponent(returnTo)}`}>Try Hack Club login again</a>
           </p>
         </>
       ) : (
-        <p>Redirecting to Hack Club Auth…</p>
+        <p>Checking sign-in options…</p>
       )}
     </PlatformShell>
   );

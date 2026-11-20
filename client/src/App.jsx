@@ -162,7 +162,7 @@ export default function App() {
     }
   }
 
-  if (pathname === "/login" && (auth.user || isLocalhost)) {
+  if (pathname === "/login" && auth.user) {
     window.location.replace(PLATFORM_DEFAULT);
     return null;
   }

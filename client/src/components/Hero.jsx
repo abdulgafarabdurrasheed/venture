@@ -84,10 +84,7 @@ const FAQ_ITEMS = [
 
 export function Hero() {
   const [authError, setAuthError] = useState("");
-  const isLocalDev = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-  const joinHref = isLocalDev
-    ? "/projects"
-    : "/api/auth/hackclub/login?returnTo=/projects";
+  const joinHref = "/login?returnTo=/projects";
   const authErrorMessages = {
     oauth_config: "Login is not configured. Contact the organizers.",
     oauth_denied: "Login was cancelled.",
