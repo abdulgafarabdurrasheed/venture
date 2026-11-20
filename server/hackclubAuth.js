@@ -35,10 +35,12 @@ export function isHackClubAuthConfigured() {
   return Boolean(readEnvValue("HC_CLIENT_ID") && readEnvValue("HC_CLIENT_SECRET"));
 }
 
-/** Hack Club OAuth is disabled only in local development (NODE_ENV=development). */
+/** Prefer configured Hack Club OAuth locally; set LOCAL_DEV_AUTH=true to force a fake dev account. */
 export function isHackClubAuthEnabled() {
   if (!isHackClubAuthConfigured()) return false;
-  return process.env.NODE_ENV !== "development";
+  const forceLocalDevAuth =
+    process.env.NODE_ENV !== "production" && process.env.LOCAL_DEV_AUTH?.trim().toLowerCase() === "true";
+  return !forceLocalDevAuth;
 }
 
 export function getAllowedRedirectUris() {

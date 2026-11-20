@@ -40,6 +40,7 @@ import {
   upsertUserFromHackClub,
 } from "./users.js";
 import { getDefaultDevEmail } from "./env.js";
+import { isLocalDevAuthEnabled } from "./localDev.js";
 
 const LOCAL_DEV_AUTH_COOKIE = "offtrack.local_user";
 const IS_PROD = process.env.NODE_ENV === "production";
@@ -83,17 +84,8 @@ const LOCAL_DEV_AUTH_COOKIE_OPTIONS = {
   path: "/",
 };
 
-function isLocalhostRequest(req) {
-  const hostHeader = (req.get("X-Forwarded-Host") || req.get("Host") || "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
-  const hostname = hostHeader.split(":")[0];
-  return hostname === "localhost" || hostname === "127.0.0.1";
-}
-
 function shouldUseLocalDevCookie(req) {
-  return process.env.NODE_ENV !== "production" && isLocalhostRequest(req);
+  return isLocalDevAuthEnabled(req);
 }
 
 function localDevCookieSecret() {
@@ -368,7 +360,7 @@ export function createAuthRouter({ rateLimiter } = {}) {
   });
 
   router.get("/dev/signup", async (req, res) => {
-    if (process.env.NODE_ENV === "production" || !isLocalhostRequest(req)) {
+    if (!isLocalDevAuthEnabled(req)) {
       res.status(404).json({ error: "Not found." });
       return;
     }
@@ -401,7 +393,7 @@ export function createAuthRouter({ rateLimiter } = {}) {
   });
 
   router.post("/dev/login", async (req, res) => {
-    if (process.env.NODE_ENV === "production" || !isLocalhostRequest(req)) {
+    if (!isLocalDevAuthEnabled(req)) {
       res.status(404).json({ error: "Not found." });
       return;
     }
@@ -428,7 +420,7 @@ export function createAuthRouter({ rateLimiter } = {}) {
   router.get("/mode", (req, res) => {
     res.json({
       hackClub: isHackClubAuthEnabled(),
-      dev: process.env.NODE_ENV !== "production" && isLocalhostRequest(req),
+      dev: isLocalDevAuthEnabled(req),
     });
   });
 

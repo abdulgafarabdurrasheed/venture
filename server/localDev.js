@@ -1,6 +1,7 @@
 import { isProduction } from "./security.js";
 import { buildSessionProfileSnapshot, upsertDevUser } from "./users.js";
 import { getDefaultDevEmail } from "./env.js";
+import { isHackClubAuthEnabled } from "./hackclubAuth.js";
 
 export function isLocalhostRequest(req) {
   const hostHeader = (req.get("X-Forwarded-Host") || req.get("Host") || "")
@@ -15,6 +16,12 @@ export function isLocalDevRequest(req) {
   return !isProduction() && isLocalhostRequest(req);
 }
 
+export function isLocalDevAuthEnabled(req) {
+  if (!isLocalDevRequest(req)) return false;
+  if (process.env.LOCAL_DEV_AUTH?.trim().toLowerCase() === "true") return true;
+  return !isHackClubAuthEnabled();
+}
+
 function localDevIdentity() {
   const fromEnv = process.env.DEV_USER_EMAIL?.trim();
   if (fromEnv) {
@@ -24,9 +31,9 @@ function localDevIdentity() {
   return { email: getDefaultDevEmail().toLowerCase(), name: "Dev User" };
 }
 
-/** Localhost dev: auto-create a session so the platform works without OAuth or login UI. */
+/** Localhost fallback: create a fake user only when local dev auth is selected. */
 export async function ensureLocalDevSession(req) {
-  if (!isLocalDevRequest(req) || req.session?.userId) {
+  if (!isLocalDevAuthEnabled(req) || req.session?.userId) {
     return;
   }
 
