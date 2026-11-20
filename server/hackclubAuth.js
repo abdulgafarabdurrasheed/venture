@@ -1,12 +1,11 @@
 const AUTH_BASE = "https://auth.hackclub.com";
 const OAUTH_CALLBACK_PATH = "/api/auth/hackclub/callback";
-// Request community-available identity fields for normal sign-in.
+// Keep normal sign-in aligned with the scopes enabled on the local Hack Club Auth app.
 const DEFAULT_SCOPES = [
   "openid",
   "email",
   "name",
   "profile",
-  "verification_status",
   "slack_id",
 ];
 
