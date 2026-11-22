@@ -48,7 +48,7 @@ import {
 } from "./shopItems.js";
 import {
   approveAdminReviewProject, awardStarsToProject,
-  awardExploreStar, listExploreProjects,
+  awardExploreStar,
   blockAdminReviewProject,
   createProjectForUser,
   getProjectForUser,
@@ -85,6 +85,17 @@ import {
   listAdminUsers,
 } from "./users.js";
 import { getUserDashboard } from "./userDashboard.js";
+import {
+  createProjectComment,
+  deleteProjectComment,
+  getPublicParticipantPage,
+  getPublicProjectPage,
+  listExploreProjects,
+  listProjectComments,
+  markExploreProjectViewed,
+  toggleProjectLike,
+  toggleUserFollow,
+} from "./community.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -766,7 +777,7 @@ app.get("/api/admin/review/media", requireStaffReview, async (req, res) => {
 
 app.get("/api/admin/review/projects", requireStaffReview, async (req, res) => {
   try {
-    const review = await listAdminReviewProjects({ shipSort: req.query.shipSort });
+    const review = await listAdminReviewProjects({ shipSort: req.query.shipSort, reviewerUserId: req.session.userId });
     res.json(review);
   } catch (error) {
     console.error("Failed to load review projects:", error);
@@ -801,15 +812,93 @@ app.post("/api/admin/review/projects/:id/star", requireStaffReview, async (req, 
 app.get("/api/explore/projects", async (req, res) => {
   try {
     let staffUserId = null;
+    const viewerUserId = req.session?.userId ?? null;
     if (req.session?.userId) {
       const user = await getUserById(req.session.userId);
       if (canAccessStaffReview(effectiveRole(user))) staffUserId = req.session.userId;
     }
-    const projects = await listExploreProjects({ staffUserId });
+    const projects = await listExploreProjects({ viewerUserId, staffUserId, search: req.query.search || "" });
     res.json({ projects });
   } catch (error) {
     console.error("Failed to load Explore projects:", error);
     res.status(500).json({ error: "Failed to load Explore projects." });
+  }
+});
+
+app.get("/api/public/projects/:id", async (req, res) => {
+  try {
+    const result = await getPublicProjectPage(req.params.id, req.session?.userId ?? null);
+    if (!result) return res.status(404).json({ error: "Project not found." });
+    res.json(result);
+  } catch (error) {
+    console.error("Failed to load public project page:", error);
+    res.status(500).json({ error: "Could not load project." });
+  }
+});
+
+app.get("/api/public/participants/:identifier", async (req, res) => {
+  try {
+    const result = await getPublicParticipantPage(req.params.identifier, req.session?.userId ?? null);
+    if (!result) return res.status(404).json({ error: "Participant not found." });
+    res.json(result);
+  } catch (error) {
+    console.error("Failed to load public participant page:", error);
+    res.status(500).json({ error: "Could not load participant." });
+  }
+});
+
+app.post("/api/explore/projects/:id/view", requireUser, async (req, res) => {
+  try {
+    res.json(await markExploreProjectViewed(req.session.userId, req.params.id));
+  } catch (error) {
+    res.status(404).json({ error: error.message || "Could not mark project viewed." });
+  }
+});
+
+app.post("/api/projects/:id/like", requireUser, async (req, res) => {
+  try {
+    res.json(await toggleProjectLike(req.session.userId, req.params.id));
+  } catch (error) {
+    const status = error.message === "Project not found." ? 404 : 400;
+    res.status(status).json({ error: error.message || "Could not update like." });
+  }
+});
+
+app.get("/api/projects/:id/comments", async (req, res) => {
+  try {
+    res.json({ comments: await listProjectComments(req.params.id, req.session?.userId ?? null) });
+  } catch (error) {
+    const status = error.message === "Project not found." ? 404 : 500;
+    res.status(status).json({ error: error.message || "Could not load comments." });
+  }
+});
+
+app.post("/api/projects/:id/comments", requireUser, async (req, res) => {
+  try {
+    const comment = await createProjectComment(req.session.userId, req.params.id, req.body.body);
+    res.status(201).json({ comment });
+  } catch (error) {
+    const status = error.message === "Project not found." ? 404 : 400;
+    res.status(status).json({ error: error.message || "Could not post comment." });
+  }
+});
+
+app.delete("/api/project-comments/:id", requireUser, async (req, res) => {
+  try {
+    const deleted = await deleteProjectComment(req.session.userId, req.params.id);
+    if (!deleted) return res.status(404).json({ error: "Comment not found." });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: "Could not delete comment." });
+  }
+});
+
+app.post("/api/participants/:id/follow", requireUser, async (req, res) => {
+  try {
+    res.json(await toggleUserFollow(req.session.userId, req.params.id));
+  } catch (error) {
+    const status = error.message === "Participant not found." ? 404 : 400;
+    res.status(status).json({ error: error.message || "Could not update follow." });
   }
 });
 
@@ -864,7 +953,7 @@ app.post("/api/admin/review/projects/:id/block", requireStaffReview, async (req,
 
 app.patch("/api/admin/review/projects/:id", requireStaffReview, async (req, res) => {
   try {
-    const reviewProject = await patchAdminReviewProjectFlags(req.params.id, req.body);
+    const reviewProject = await patchAdminReviewProjectFlags(req.params.id, req.body, req.session.userId);
     res.json(reviewProject);
   } catch (error) {
     console.error("Failed to update review project:", error);
@@ -892,7 +981,7 @@ app.post("/api/admin/review/projects/:id/reduce-hours", requireStaffReview, asyn
 
 app.get("/api/admin/review/projects/:id/participant-pending-orders", requireStaffReview, async (req, res) => {
   try {
-    const result = await getParticipantPendingOrdersForReview(req.params.id);
+    const result = await getParticipantPendingOrdersForReview(req.params.id, req.session.userId);
     res.json(result);
   } catch (error) {
     console.error("Failed to load participant pending orders:", error);
@@ -902,7 +991,7 @@ app.get("/api/admin/review/projects/:id/participant-pending-orders", requireStaf
 
 app.post("/api/admin/review/projects/:id/participant-orders/:orderId/reject", requireStaffReview, async (req, res) => {
   try {
-    const result = await rejectParticipantOrderForReview(req.params.id, req.params.orderId);
+    const result = await rejectParticipantOrderForReview(req.params.id, req.params.orderId, req.session.userId);
     res.json(result);
   } catch (error) {
     console.error("Failed to reject participant order from review:", error);

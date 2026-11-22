@@ -384,7 +384,7 @@ export function ProjectsPage() {
 
       {!loading ? (
         <div className="projects-page">
-          <a className="projects-page__explore-link" href="/explore">Explore shipped projects →</a>
+          <a className="projects-page__explore-link" href="/explore">Explore projects →</a>
           <div className="projects-page__grid">
             {pageProjects.map((project) => (
               <ProjectCard
