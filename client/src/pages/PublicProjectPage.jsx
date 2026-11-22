@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api/client.js";
 import { useAuth } from "../auth/AuthContext.jsx";
+import { CommunityImage } from "../components/CommunityImage.jsx";
 import { JournalDescription } from "../components/JournalDescription.jsx";
 import { PlatformLayout } from "../platform/PlatformLayout.jsx";
-import { resolveStackAssetUrl } from "../utils/mediaUrls.js";
 import "./PublicPages.css";
 
 function displayDate(value) {
@@ -18,6 +18,7 @@ export function PublicProjectPage({ projectId }) {
   const [pageData, setPageData] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentDraft, setCommentDraft] = useState("");
+  const [commentError, setCommentError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,11 +28,14 @@ export function PublicProjectPage({ projectId }) {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Could not load comments.");
     setComments(data.comments || []);
+    setCommentError("");
   }
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setError("");
+    setCommentError("");
     Promise.all([
       fetch(`/api/public/projects/${projectId}`, { credentials: "include" }).then(async (response) => {
         const data = await response.json();
@@ -42,6 +46,9 @@ export function PublicProjectPage({ projectId }) {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Could not load comments.");
         return data.comments || [];
+      }).catch((commentsLoadError) => {
+        if (active) setCommentError(commentsLoadError.message || "Could not load comments.");
+        return [];
       }),
     ]).then(([data, commentList]) => {
       if (!active) return;
@@ -75,10 +82,6 @@ export function PublicProjectPage({ projectId }) {
       window.location.href = `/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
-    if (!user) {
-      window.location.href = `/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
-      return;
-    }
     setBusy(true);
     try {
       const response = await apiFetch(`/api/participants/${project.owner.id}/follow`, { method: "POST" });
@@ -102,8 +105,12 @@ export function PublicProjectPage({ projectId }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not post comment.");
       setCommentDraft("");
-      await loadComments();
       setProject((current) => ({ ...current, commentCount: Number(current.commentCount || 0) + 1 }));
+      try {
+        await loadComments();
+      } catch {
+        setCommentError("Comment posted, but the list could not be refreshed.");
+      }
     } catch (actionError) { setError(actionError.message || "Could not post comment."); }
     finally { setBusy(false); }
   }
@@ -116,13 +123,24 @@ export function PublicProjectPage({ projectId }) {
         {!loading && project ? <>
           <a className="public-page__back" href="/explore">← Explore</a>
           <header className="public-project-page__hero">
-            {project.imageUrl ? <img className="public-project-page__image" src={resolveStackAssetUrl(project.imageUrl)} alt={`${project.name} preview`} /> : <div className="public-project-page__image public-project-page__image--empty">Off-Track</div>}
+            <CommunityImage
+              className="public-project-page__image"
+              placeholderClassName="public-project-page__image--empty"
+              src={project.imageUrl}
+              alt={`${project.name || "Project"} preview`}
+              placeholderText="Preview unavailable"
+            />
             <div className="public-project-page__intro">
               <span className="public-page__eyebrow">{project.projectType || "Project"} · {project.shipped ? "Shipped" : "In progress"}</span>
               <h1>{project.name}</h1>
               <p>{project.description || "No description yet."}</p>
               <a className="public-project-page__maker" href={`/participants/${encodeURIComponent(project.owner.slug || project.owner.id)}`}>
-                {project.owner.profileImageUrl ? <img src={resolveStackAssetUrl(project.owner.profileImageUrl)} alt="" /> : null}
+                <CommunityImage
+                  className="public-project-page__maker-avatar"
+                  src={project.owner.profileImageUrl}
+                  alt={`${project.owner.name} avatar`}
+                  placeholderText={project.owner.name.slice(0, 1).toUpperCase()}
+                />
                 {project.owner.name}
               </a>
               <div className="public-project-page__actions">
@@ -165,6 +183,7 @@ export function PublicProjectPage({ projectId }) {
               {comments.map((comment) => <article key={comment.id}><a href={`/participants/${encodeURIComponent(comment.author.slug || comment.author.id)}`}>{comment.author.name}</a><p>{comment.body}</p><time>{displayDate(comment.createdAt)}</time></article>)}
               {!comments.length ? <p>No comments yet.</p> : null}
             </div>
+            {commentError ? <p className="public-page__error" role="alert">{commentError}</p> : null}
           </section>
         </> : null}
       </main>

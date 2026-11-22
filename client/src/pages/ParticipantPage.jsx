@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api/client.js";
 import { useAuth } from "../auth/AuthContext.jsx";
+import { CommunityImage } from "../components/CommunityImage.jsx";
 import { PlatformLayout } from "../platform/PlatformLayout.jsx";
-import { resolveStackAssetUrl } from "../utils/mediaUrls.js";
 import "./PublicPages.css";
 
 export function ParticipantPage({ identifier }) {
@@ -37,10 +37,6 @@ export function ParticipantPage({ identifier }) {
       window.location.href = `/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
-    if (!user) {
-      window.location.href = `/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
-      return;
-    }
     setBusy(true);
     setError("");
     try {
@@ -64,7 +60,13 @@ export function ParticipantPage({ identifier }) {
           <a className="public-page__back" href="/explore">← Explore</a>
           <header className="participant-page__profile">
             <div className="participant-page__avatar">
-              {participant.profileImageUrl ? <img src={resolveStackAssetUrl(participant.profileImageUrl)} alt="" /> : <span>{participant.name.slice(0, 1).toUpperCase()}</span>}
+              <CommunityImage
+                className="participant-page__avatar-image"
+                placeholderClassName="participant-page__avatar-fallback"
+                src={participant.profileImageUrl}
+                alt={`${participant.name} avatar`}
+                placeholderText={participant.name.slice(0, 1).toUpperCase()}
+              />
             </div>
             <div className="participant-page__identity">
               <p>VENTURE MAKER</p>
@@ -85,7 +87,13 @@ export function ParticipantPage({ identifier }) {
             {projects.length === 0 ? <p>This maker hasn’t added any visible projects yet.</p> : null}
             <div className="public-project-grid__items">
               {projects.map((project) => <a className="public-project-card" href={`/project/${project.id}`} key={project.id}>
-                {project.imageUrl ? <img src={resolveStackAssetUrl(project.imageUrl)} alt="" loading="lazy" /> : <div className="public-project-card__placeholder">Off-Track</div>}
+                <CommunityImage
+                  className="public-project-card__image"
+                  placeholderClassName="public-project-card__placeholder"
+                  src={project.imageUrl}
+                  alt={`${project.name || "Project"} preview`}
+                  placeholderText="Preview unavailable"
+                />
                 <div><span>{project.projectType || "Project"} · {project.shipped ? "Shipped" : "In progress"}</span><h3>{project.name}</h3><p>{project.description || "No description yet."}</p><small>♥ {project.likeCount} · {project.commentCount} comments</small></div>
               </a>)}
             </div>

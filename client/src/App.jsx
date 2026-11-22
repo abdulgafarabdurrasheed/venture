@@ -22,6 +22,7 @@ import { PublicProjectPage } from "./pages/PublicProjectPage.jsx";
 import { ShopPage } from "./pages/ShopPage.jsx";
 import { TestPage } from "./pages/TestPage.jsx";
 import { UserAreaPage } from "./pages/UserAreaPage.jsx";
+import { decodePathSegment } from "./utils/pathSegments.js";
 
 const PUBLIC_PATHS = new Set(["/", "/rules", "/rsvp"]);
 const PLATFORM_DEFAULT = "/projects";
@@ -149,14 +150,14 @@ export default function App() {
     if (pathname.startsWith("/project/")) {
       return (
         <AuthContext.Provider value={contextValue}>
-          <PublicProjectPage projectId={pathname.slice("/project/".length)} />
+          <PublicProjectPage projectId={decodePathSegment(pathname.slice("/project/".length))} />
         </AuthContext.Provider>
       );
     }
     if (pathname.startsWith("/participants/")) {
       return (
         <AuthContext.Provider value={contextValue}>
-          <ParticipantPage identifier={pathname.slice("/participants/".length)} />
+          <ParticipantPage identifier={decodePathSegment(pathname.slice("/participants/".length))} />
         </AuthContext.Provider>
       );
     }

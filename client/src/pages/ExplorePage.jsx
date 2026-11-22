@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../api/client.js";
 import { useAuth } from "../auth/AuthContext.jsx";
-import { resolveStackAssetUrl } from "../utils/mediaUrls.js";
+import { CommunityImage } from "../components/CommunityImage.jsx";
 import "./ExplorePage.css";
 
 function canStaffReview(role) {
@@ -20,10 +20,20 @@ function readSeen(key) {
   }
 }
 
+function writeSeen(key, ids) {
+  try {
+    localStorage.setItem(key, JSON.stringify(ids));
+  } catch {
+    // Browsing still works when storage is disabled or full; only cross-visit memory is lost.
+  }
+}
+
 export function ExplorePage() {
   const { user, reload } = useAuth();
   const scrollRef = useRef(null);
   const sentSeen = useRef(new Set());
+  const commentsRequestId = useRef(0);
+  const busyActionsRef = useRef(new Set());
   const storageKey = useMemo(() => seenStorageKey(user), [user?.id]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -35,10 +45,21 @@ export function ExplorePage() {
   const [commentDraft, setCommentDraft] = useState("");
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentError, setCommentError] = useState("");
-  const [busyAction, setBusyAction] = useState("");
+  const [busyActions, setBusyActions] = useState(() => new Set());
   const staff = canStaffReview(user?.role);
 
-  const loadProjects = useCallback(async (query = activeSearch) => {
+  function markActionBusy(action, busy) {
+    if (busy) busyActionsRef.current.add(action);
+    else busyActionsRef.current.delete(action);
+    setBusyActions((current) => {
+      const next = new Set(current);
+      if (busy) next.add(action);
+      else next.delete(action);
+      return next;
+    });
+  }
+
+  const loadProjects = useCallback(async (query = activeSearch, { signal } = {}) => {
     setLoading(true);
     setError("");
     try {
@@ -47,25 +68,30 @@ export function ExplorePage() {
       const response = await fetch(`/api/explore/projects${params.size ? `?${params}` : ""}`, {
         credentials: "include",
         cache: "no-store",
+        signal,
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not load Explore projects.");
+      if (signal?.aborted) return;
       const seen = query.trim() ? new Set() : readSeen(storageKey);
       setProjects((data.projects || []).filter((project) => !seen.has(String(project.id))));
       sentSeen.current.clear();
     } catch (loadError) {
-      setError(loadError.message || "Could not load Explore projects.");
+      if (!signal?.aborted) setError(loadError.message || "Could not load Explore projects.");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [activeSearch, storageKey]);
 
   useEffect(() => {
-    loadProjects();
-  }, [loadProjects]);
+    const controller = new AbortController();
+    loadProjects(activeSearch, { signal: controller.signal });
+    return () => controller.abort();
+  }, [activeSearch, loadProjects]);
 
   useEffect(() => {
     if (!scrollRef.current || !projects.length) return undefined;
+    if (typeof IntersectionObserver === "undefined") return undefined;
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting || entry.intersectionRatio < 0.6) continue;
@@ -74,7 +100,7 @@ export function ExplorePage() {
         sentSeen.current.add(id);
         const seen = readSeen(storageKey);
         seen.add(String(id));
-        localStorage.setItem(storageKey, JSON.stringify([...seen]));
+        writeSeen(storageKey, [...seen]);
         if (user?.id) {
           apiFetch(`/api/explore/projects/${id}/view`, { method: "POST" }).catch(() => {});
         }
@@ -125,7 +151,9 @@ export function ExplorePage() {
       window.location.href = `/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
-    setBusyAction(`like:${project.id}`);
+    const action = `like:${project.id}`;
+    if (busyActionsRef.current.has(action)) return;
+    markActionBusy(action, true);
     setError("");
     try {
       const response = await apiFetch(`/api/projects/${project.id}/like`, { method: "POST" });
@@ -137,7 +165,7 @@ export function ExplorePage() {
     } catch (actionError) {
       setError(actionError.message || "Could not update like.");
     } finally {
-      setBusyAction("");
+      markActionBusy(action, false);
     }
   }
 
@@ -146,7 +174,9 @@ export function ExplorePage() {
       window.location.href = `/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
-    setBusyAction(`follow:${project.id}`);
+    const action = `follow:${project.owner.id}`;
+    if (busyActionsRef.current.has(action)) return;
+    markActionBusy(action, true);
     setError("");
     try {
       const response = await apiFetch(`/api/participants/${project.owner.id}/follow`, { method: "POST" });
@@ -158,11 +188,12 @@ export function ExplorePage() {
     } catch (actionError) {
       setError(actionError.message || "Could not update follow.");
     } finally {
-      setBusyAction("");
+      markActionBusy(action, false);
     }
   }
 
   async function openComments(project) {
+    const requestId = ++commentsRequestId.current;
     setCommentsProject(project);
     setComments([]);
     setCommentError("");
@@ -171,12 +202,20 @@ export function ExplorePage() {
       const response = await fetch(`/api/projects/${project.id}/comments`, { credentials: "include" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not load comments.");
-      setComments(data.comments || []);
+      if (requestId === commentsRequestId.current) setComments(data.comments || []);
     } catch (loadError) {
-      setCommentError(loadError.message || "Could not load comments.");
+      if (requestId === commentsRequestId.current) {
+        setCommentError(loadError.message || "Could not load comments.");
+      }
     } finally {
-      setCommentsLoading(false);
+      if (requestId === commentsRequestId.current) setCommentsLoading(false);
     }
+  }
+
+  function closeComments() {
+    commentsRequestId.current += 1;
+    setCommentsProject(null);
+    setCommentsLoading(false);
   }
 
   async function postComment(event) {
@@ -186,32 +225,44 @@ export function ExplorePage() {
       window.location.href = `/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
-    setBusyAction("comment");
+    const projectId = commentsProject.id;
+    const requestId = commentsRequestId.current;
+    markActionBusy("comment", true);
     setCommentError("");
     try {
-      const response = await apiFetch(`/api/projects/${commentsProject.id}/comments`, {
+      const response = await apiFetch(`/api/projects/${projectId}/comments`, {
         method: "POST",
         body: JSON.stringify({ body: commentDraft }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not post comment.");
-      setCommentDraft("");
-      const refreshed = await fetch(`/api/projects/${commentsProject.id}/comments`, { credentials: "include" });
-      const refreshedData = await refreshed.json();
-      setComments(refreshedData.comments || []);
-      setProjects((current) => current.map((item) => item.id === commentsProject.id
+      if (requestId === commentsRequestId.current) setCommentDraft("");
+      setProjects((current) => current.map((item) => item.id === projectId
         ? { ...item, commentCount: Number(item.commentCount || 0) + 1 }
         : item));
+      try {
+        const refreshed = await fetch(`/api/projects/${projectId}/comments`, { credentials: "include" });
+        const refreshedData = await refreshed.json();
+        if (!refreshed.ok) throw new Error(refreshedData.error || "Could not refresh comments.");
+        if (requestId === commentsRequestId.current) setComments(refreshedData.comments || []);
+      } catch {
+        if (requestId === commentsRequestId.current) {
+          setCommentError("Comment posted, but the list could not be refreshed.");
+        }
+      }
     } catch (postError) {
-      setCommentError(postError.message || "Could not post comment.");
+      if (requestId === commentsRequestId.current) {
+        setCommentError(postError.message || "Could not post comment.");
+      }
     } finally {
-      setBusyAction("");
+      markActionBusy("comment", false);
     }
   }
 
   async function awardStar(project) {
-    if (!project?.canAwardStar || busyAction) return;
-    setBusyAction(`star:${project.id}`);
+    if (!project?.canAwardStar || busyActionsRef.current.size > 0) return;
+    const action = `star:${project.id}`;
+    markActionBusy(action, true);
     setError("");
     try {
       const response = await apiFetch(`/api/explore/projects/${project.id}/star`, { method: "POST" });
@@ -226,7 +277,7 @@ export function ExplorePage() {
     } catch (actionError) {
       setError(actionError.message || "Could not award a star.");
     } finally {
-      setBusyAction("");
+      markActionBusy(action, false);
     }
   }
 
@@ -255,24 +306,37 @@ export function ExplorePage() {
       ) : null}
 
       <section className="explore-shorts__feed" aria-label="Projects, oldest first">
-        {projects.map((project) => {
+        {projects.map((project, index) => {
           const href = `/participants/${encodeURIComponent(project.owner.slug || project.owner.id)}`;
           return (
             <article className="explore-short" key={project.id} data-project-id={project.id}>
-              {project.imageUrl ? <img className="explore-short__image" src={resolveStackAssetUrl(project.imageUrl)} alt={`${project.name} preview`} /> : <div className="explore-short__image explore-short__image--empty">No project image</div>}
+              <CommunityImage
+                className="explore-short__image"
+                placeholderClassName="explore-short__image--empty"
+                src={project.imageUrl}
+                alt={`${project.name || "Project"} preview`}
+                placeholderText="Preview unavailable"
+                loading={index === 0 ? "eager" : "lazy"}
+              />
               <div className="explore-short__shade" />
               <aside className="explore-short__actions" aria-label={`${project.name} actions`}>
                 <a className="explore-short__avatar" href={href} aria-label={`Open ${project.owner.name}'s page`}>
-                  {project.owner.profileImageUrl ? <img src={resolveStackAssetUrl(project.owner.profileImageUrl)} alt="" /> : <span>{project.owner.name.slice(0, 1).toUpperCase()}</span>}
+                  <CommunityImage
+                    className="explore-short__avatar-image"
+                    placeholderClassName="explore-short__avatar-fallback"
+                    src={project.owner.profileImageUrl}
+                    alt={`${project.owner.name} avatar`}
+                    placeholderText={project.owner.name.slice(0, 1).toUpperCase()}
+                  />
                 </a>
-                {!project.isOwnProject ? <button className="explore-short__follow" disabled={busyAction === `follow:${project.id}`} onClick={() => toggleFollow(project)} aria-label={project.owner.followedByViewer ? `Unfollow ${project.owner.name}` : `Follow ${project.owner.name}`}>{project.owner.followedByViewer ? "✓" : "+"}</button> : null}
-                <button className={`explore-short__action${project.likedByViewer ? " is-active" : ""}`} onClick={() => toggleLike(project)} disabled={busyAction === `like:${project.id}`} aria-label={project.likedByViewer ? "Unlike project" : "Like project"}>
+                {!project.isOwnProject ? <button className="explore-short__follow" disabled={busyActions.has(`follow:${project.owner.id}`)} onClick={() => toggleFollow(project)} aria-label={project.owner.followedByViewer ? `Unfollow ${project.owner.name}` : `Follow ${project.owner.name}`}>{project.owner.followedByViewer ? "✓" : "+"}</button> : null}
+                <button className={`explore-short__action${project.likedByViewer ? " is-active" : ""}`} onClick={() => toggleLike(project)} disabled={busyActions.has(`like:${project.id}`)} aria-label={project.likedByViewer ? "Unlike project" : "Like project"}>
                   <span>♥</span><small>{project.likeCount}</small>
                 </button>
                 <button className="explore-short__action" onClick={() => openComments(project)} aria-label="Open comments">
                   <span>▤</span><small>{project.commentCount}</small>
                 </button>
-                {staff && project.canAwardStar ? <button className="explore-short__action explore-short__star" onClick={() => awardStar(project)} disabled={busyAction === `star:${project.id}`} aria-label="Give one star"><span>☆</span><small>Star</small></button> : null}
+                {staff && project.canAwardStar ? <button className="explore-short__action explore-short__star" onClick={() => awardStar(project)} disabled={busyActions.has(`star:${project.id}`)} aria-label="Give one star"><span>☆</span><small>Star</small></button> : null}
                 <button className="explore-short__action" onClick={() => goToNext(1)} aria-label="Next project"><span>↓</span><small>Next</small></button>
               </aside>
               <div className="explore-short__caption">
@@ -296,9 +360,9 @@ export function ExplorePage() {
       </section>
 
       {commentsProject ? (
-        <div className="explore-comments__scrim" role="presentation" onClick={() => setCommentsProject(null)}>
+        <div className="explore-comments__scrim" role="presentation" onClick={closeComments}>
           <section className="explore-comments" role="dialog" aria-modal="true" aria-label={`Comments for ${commentsProject.name}`} onClick={(event) => event.stopPropagation()}>
-            <header><div><h2>Comments</h2><p>{commentsProject.name}</p></div><button type="button" onClick={() => setCommentsProject(null)} aria-label="Close comments">×</button></header>
+            <header><div><h2>Comments</h2><p>{commentsProject.name}</p></div><button type="button" onClick={closeComments} aria-label="Close comments">×</button></header>
             <div className="explore-comments__list">
               {commentsLoading ? <p>Loading comments…</p> : null}
               {!commentsLoading && comments.length === 0 ? <p>Start the conversation.</p> : null}
@@ -310,7 +374,7 @@ export function ExplorePage() {
             </div>
             <form onSubmit={postComment}>
               <textarea value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} maxLength={2000} placeholder={user ? "Add a comment…" : "Sign in to comment"} aria-label="Comment" />
-              <button type="submit" disabled={!commentDraft.trim() || busyAction === "comment"}>{busyAction === "comment" ? "Posting…" : "Post"}</button>
+              <button type="submit" disabled={!commentDraft.trim() || busyActions.has("comment")}>{busyActions.has("comment") ? "Posting…" : "Post"}</button>
             </form>
             {commentError ? <p className="explore-comments__error" role="alert">{commentError}</p> : null}
           </section>

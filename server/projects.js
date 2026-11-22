@@ -14,6 +14,8 @@ import {
 } from "./hackatimeAuth.js";
 import { COINS_PER_APPROVED_HOUR } from "./coinRates.js";
 import { MAX_PARTICIPANT_STARS, MAX_REVIEW_STARS_PER_PROJECT } from "./starConstants.js";
+import { exploreStarEligibilityError, isPublicCommunityProject, maxReviewStarAward } from "./communityRules.js";
+import { assertReviewerIsNotProjectOwner } from "./reviewRules.js";
 
 export { COINS_PER_APPROVED_HOUR };
 
@@ -698,12 +700,6 @@ export async function shipProjectForUser(userId, projectId, { reshipUpdate } = {
 }
 
 export { buildDefaultJustificationTemplate } from "./hourJustification.js";
-
-function assertReviewerIsNotProjectOwner(reviewerUserId, projectUserId) {
-  if (reviewerUserId != null && projectUserId != null && Number(reviewerUserId) === Number(projectUserId)) {
-    throw new Error("You can't review a project you own.");
-  }
-}
 
 export async function listAdminReviewProjects({ shipSort = "oldest", reviewerUserId = null } = {}) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
@@ -2286,11 +2282,7 @@ export async function awardStarsToProject(adminId, projectId, stars) {
       [project.user_id]
     );
     const participantStarsBefore = Number(participantStarsResult.rows[0]?.stars ?? 0);
-    const availableForThisAward = Math.max(
-      0,
-      MAX_PARTICIPANT_STARS - (participantStarsBefore - existingStaffStars)
-    );
-    const maxThisAward = Math.min(MAX_REVIEW_STARS_PER_PROJECT, availableForThisAward);
+    const maxThisAward = maxReviewStarAward(participantStarsBefore, existingStaffStars);
     if (stars > maxThisAward) {
       throw new Error(
         `This participant can receive at most ${maxThisAward} more star${maxThisAward === 1 ? "" : "s"} from this review and is capped at ${MAX_PARTICIPANT_STARS} total.`
@@ -2377,12 +2369,7 @@ export async function awardExploreStar(staffUserId, projectId) {
       [projectId]
     );
     const project = projectResult.rows[0];
-    if (
-      !project ||
-      project.blocked ||
-      project.fraud_flag ||
-      ["rejected", "reship-rejected", "blocked", "banned", "archived"].includes(String(project.status || "").toLowerCase())
-    ) {
+    if (!isPublicCommunityProject(project)) {
       throw new Error("This project is not available in Explore.");
     }
     if (Number(project.user_id) === Number(staffUserId)) {
@@ -2390,20 +2377,23 @@ export async function awardExploreStar(staffUserId, projectId) {
     }
 
     await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [project.user_id]);
-    const alreadyAwarded = await client.query(
-      `SELECT id FROM project_star_awards WHERE project_id = $1 AND staff_user_id = $2`,
+    const existingAward = await client.query(
+      `SELECT id FROM project_star_awards WHERE project_id = $1 AND staff_user_id = $2 FOR UPDATE`,
       [projectId, staffUserId]
     );
-    if (alreadyAwarded.rowCount) throw new Error("You have already awarded this project a star.");
 
     const participantStarsResult = await client.query(
       `SELECT COALESCE(SUM(stars), 0)::int AS stars FROM projects WHERE user_id = $1`,
       [project.user_id]
     );
     const participantStarsBefore = Number(participantStarsResult.rows[0]?.stars ?? 0);
-    if (participantStarsBefore >= MAX_PARTICIPANT_STARS) {
-      throw new Error(`This participant has reached the ${MAX_PARTICIPANT_STARS}-star limit.`);
-    }
+    const eligibilityError = exploreStarEligibilityError({
+      project,
+      staffUserId,
+      participantStars: participantStarsBefore,
+      alreadyAwarded: existingAward.rowCount > 0,
+    });
+    if (eligibilityError) throw new Error(eligibilityError);
 
     await client.query(
       `INSERT INTO project_star_awards (project_id, staff_user_id, stars, source) VALUES ($1, $2, 1, 'explore')`,

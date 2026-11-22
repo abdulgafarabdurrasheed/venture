@@ -1,9 +1,16 @@
 import { pool } from "./db.js";
+import {
+  canAwardExploreStar,
+  isPublicCommunityProject,
+  normalizeProjectComment,
+  PUBLIC_PROJECT_EXCLUDED_STATUSES,
+} from "./communityRules.js";
 
+const excludedStatusSql = PUBLIC_PROJECT_EXCLUDED_STATUSES.map((status) => `'${status}'`).join(", ");
 const PUBLIC_PROJECT_EXCLUSIONS = `
   p.blocked IS NOT TRUE
   AND p.fraud_flag IS NOT TRUE
-  AND LOWER(COALESCE(p.status, '')) NOT IN ('rejected', 'reship-rejected', 'blocked', 'banned', 'archived')
+  AND LOWER(COALESCE(p.status, '')) NOT IN (${excludedStatusSql})
 `;
 
 function publicProject(row) {
@@ -102,12 +109,7 @@ export async function listExploreProjects({ viewerUserId = null, staffUserId = n
         EXISTS (SELECT 1 FROM user_follows f WHERE f.follower_user_id = $1::int AND f.followed_user_id = u.id) AS followed_by_viewer,
         CASE WHEN $2::int IS NULL THEN FALSE ELSE EXISTS (
           SELECT 1 FROM project_star_awards a WHERE a.project_id = p.id AND a.staff_user_id = $2
-        ) END AS staff_already_awarded,
-        CASE WHEN $2::int IS NULL THEN FALSE ELSE (
-          p.user_id <> $2::int AND COALESCE(u.total_stars, 0) < 5 AND NOT EXISTS (
-            SELECT 1 FROM project_star_awards a WHERE a.project_id = p.id AND a.staff_user_id = $2
-          )
-        ) END AS can_award_star
+        ) END AS staff_already_awarded
       FROM projects p
       JOIN users u ON u.id = p.user_id
       WHERE ${PUBLIC_PROJECT_EXCLUSIONS}
@@ -119,7 +121,15 @@ export async function listExploreProjects({ viewerUserId = null, staffUserId = n
     `,
     [viewerUserId, staffUserId, normalizedSearch]
   );
-  return result.rows.map(publicProject);
+  return result.rows.map((row) => publicProject({
+    ...row,
+    can_award_star: canAwardExploreStar({
+      ownerUserId: row.user_id,
+      staffUserId,
+      participantStars: row.owner_total_stars,
+      alreadyAwarded: row.staff_already_awarded,
+    }),
+  }));
 }
 
 export async function markExploreProjectViewed(userId, projectId) {
@@ -289,8 +299,7 @@ export async function listProjectComments(projectId, viewerUserId = null) {
 
 export async function createProjectComment(userId, projectId, body) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
-  const text = String(body || "").trim();
-  if (!text || text.length > 2000) throw new Error("Comments must be between 1 and 2,000 characters.");
+  const text = normalizeProjectComment(body);
   const result = await pool.query(
     `
       INSERT INTO project_comments (project_id, user_id, body)
@@ -309,14 +318,39 @@ export async function deleteProjectComment(userId, commentId) {
   return result.rowCount > 0;
 }
 
-export async function toggleUserFollow(followerUserId, followedUserId) {
-  if (!pool) throw new Error("DATABASE_URL is not set.");
+export async function toggleUserFollowWithPool(dbPool, followerUserId, followedUserId) {
+  if (!dbPool) throw new Error("DATABASE_URL is not set.");
   if (Number(followerUserId) === Number(followedUserId)) throw new Error("You can't follow yourself.");
-  const target = await pool.query(`SELECT id FROM users WHERE id = $1`, [followedUserId]);
-  if (!target.rows[0]) throw new Error("Participant not found.");
-  const removed = await pool.query(`DELETE FROM user_follows WHERE follower_user_id = $1 AND followed_user_id = $2 RETURNING followed_user_id`, [followerUserId, followedUserId]);
-  const following = removed.rowCount === 0;
-  if (following) await pool.query(`INSERT INTO user_follows (follower_user_id, followed_user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [followerUserId, followedUserId]);
-  const count = await pool.query(`SELECT COUNT(*)::int AS count FROM user_follows WHERE followed_user_id = $1`, [followedUserId]);
-  return { following, followerCount: Number(count.rows[0]?.count || 0) };
+  const client = await dbPool.connect();
+  try {
+    await client.query("BEGIN");
+    const target = await client.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [followedUserId]);
+    if (!target.rows[0]) throw new Error("Participant not found.");
+    const removed = await client.query(
+      `DELETE FROM user_follows WHERE follower_user_id = $1 AND followed_user_id = $2 RETURNING followed_user_id`,
+      [followerUserId, followedUserId]
+    );
+    const following = removed.rowCount === 0;
+    if (following) {
+      await client.query(
+        `INSERT INTO user_follows (follower_user_id, followed_user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [followerUserId, followedUserId]
+      );
+    }
+    const count = await client.query(
+      `SELECT COUNT(*)::int AS count FROM user_follows WHERE followed_user_id = $1`,
+      [followedUserId]
+    );
+    await client.query("COMMIT");
+    return { following, followerCount: Number(count.rows[0]?.count || 0) };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function toggleUserFollow(followerUserId, followedUserId) {
+  return toggleUserFollowWithPool(pool, followerUserId, followedUserId);
 }

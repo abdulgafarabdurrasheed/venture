@@ -13,7 +13,8 @@
 
 .participant-page__profile { display: flex; align-items: center; gap: clamp(1rem, 3vw, 2.5rem); border-bottom: 2px solid #b89a6b; padding: 1rem 0 1.6rem; }
 .participant-page__avatar { display: grid; place-items: center; width: clamp(5.5rem, 15vw, 10rem); aspect-ratio: 1; flex: 0 0 auto; overflow: hidden; border: 4px solid #64472b; border-radius: 50%; background: #c4d3ce; color: #54381f; font-size: 3rem; font-weight: 800; }
-.participant-page__avatar img { width: 100%; height: 100%; object-fit: cover; }
+.participant-page__avatar-image,
+.participant-page__avatar-fallback { display: grid; width: 100%; height: 100%; object-fit: cover; place-items: center; }
 .participant-page__identity { flex: 1; min-width: 0; }
 .participant-page__identity > p:first-child { margin: 0; color: #82613b; font-size: 0.8rem; font-weight: 800; letter-spacing: 0.12em; }
 .participant-page__identity h1 { margin: 0.2rem 0; overflow-wrap: anywhere; font-size: clamp(1.6rem, 4vw, 3rem); }
@@ -46,7 +47,7 @@
 .public-project-page__intro h1 { margin: 0.35rem 0 0.5rem; overflow-wrap: anywhere; font-size: clamp(1.8rem, 4vw, 3.25rem); }
 .public-project-page__intro > p { white-space: pre-wrap; }
 .public-project-page__maker { display: inline-flex; align-items: center; gap: 0.6rem; color: #674925; font-weight: 800; }
-.public-project-page__maker img { width: 2.2rem; height: 2.2rem; border-radius: 50%; object-fit: cover; }
+.public-project-page__maker-avatar { display: grid; width: 2.2rem; height: 2.2rem; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #c4d3ce; color: #54381f; object-fit: cover; }
 .public-project-page__actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
 .public-project-page__details { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; border-block: 2px solid #b89a6b; margin-top: 1.5rem; padding: 1rem 0; }
 .public-project-page__facts { display: flex; flex-wrap: wrap; gap: 0.7rem 1.5rem; }
