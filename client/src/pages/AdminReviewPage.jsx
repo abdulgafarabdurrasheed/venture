@@ -2,7 +2,6 @@ import { apiFetch } from "../api/client.js";
 import { useAuth } from "../auth/AuthContext.jsx";
 import { useEffect, useMemo, useState } from "react";
 import { JournalDescription } from "../components/JournalDescription.jsx";
-import { COINS_PER_APPROVED_HOUR } from "../constants/coinRates.js";
 import { readJsonResponse } from "../utils/fetchJson.js";
 import { resolveStackAssetUrl } from "../utils/mediaUrls.js";
 import { formatReviewRecordMeta } from "../utils/projectHelpers.js";
@@ -307,7 +306,7 @@ function AdminReviewDetail({ projectId }) {
       const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.error || "Failed to load project.");
       setProject(data.project);
-      setStarsDraft(String(Number(data.project?.stars ?? 0)));
+      setStarsDraft(String(Number(data.project?.staffStarAward ?? 0)));
       setJournalEntries(data.journalEntries || []);
       setApprovedHours("");
       setReducedApprovedHours("");
@@ -322,13 +321,13 @@ function AdminReviewDetail({ projectId }) {
   async function saveProjectStars() {
     if (!project) return;
     const stars = Number(starsDraft);
-    if (!Number.isInteger(stars) || stars < 0 || stars > 5) {
-      setMessage("Choose a project star rating from 0 to 5.");
+    if (!Number.isInteger(stars) || stars < 0 || stars > 2) {
+      setMessage("Choose a review award from 0 to 2 stars.");
       return;
     }
-    const currentStars = Number(project.stars ?? 0);
+    const currentStars = Number(project.staffStarAward ?? 0);
     if (stars === currentStars) return;
-    if (stars < currentStars && !window.confirm("Lowering this rating may remove shop unlock stars from the participant. Continue?")) {
+    if (stars < currentStars && !window.confirm("Remove one or more stars from your review award?")) {
       return;
     }
 
@@ -343,9 +342,14 @@ function AdminReviewDetail({ projectId }) {
       });
       const data = await readJsonResponse(response);
       if (!response.ok) throw new Error(data.error || "Failed to update project stars.");
-      setProject((current) => ({ ...current, ...data.project }));
-      setStarsDraft(String(Number(data.project?.stars ?? stars)));
-      setMessage("Project stars updated. Shop unlock access now reflects this rating.");
+      setProject((current) => ({
+        ...current,
+        ...data.project,
+        staffStarAward: data.staffStarAward,
+        user: { ...current.user, totalStars: data.participantTotalStars },
+      }));
+      setStarsDraft(String(Number(data.staffStarAward ?? stars)));
+      setMessage("Your review star award was saved.");
     } catch (err) {
       setMessage(err.message || "Failed to update project stars.");
     } finally {
@@ -497,12 +501,10 @@ function AdminReviewDetail({ projectId }) {
       return;
     }
 
-    const hoursReduced = Number((currentApproved - newApprovedHours).toFixed(2));
-    const coinsReduced = Number((hoursReduced * COINS_PER_APPROVED_HOUR).toFixed(2));
     if (!skipConfirm) {
       const ok = window.confirm(
         `Reduce approved hours from ${formatHours(currentApproved)} h to ${formatHours(newApprovedHours)} h? ` +
-          `This removes ${formatHours(hoursReduced)} h and deducts ${formatHours(coinsReduced)} coins from the participant.`
+          "The participant's coin balance will also be adjusted."
       );
       if (!ok) return;
     }
@@ -521,9 +523,6 @@ function AdminReviewDetail({ projectId }) {
       const data = await readJsonResponse(response);
       if (response.status === 409 && data.code === "INSUFFICIENT_COINS_FOR_REDUCTION") {
         setCoinsConflictModal({
-          coinsShortfall: Number(data.coinsShortfall ?? 0),
-          coinsToDeduct: Number(data.coinsToDeduct ?? coinsReduced),
-          userCoins: Number(data.userCoins ?? 0),
           pendingOrders: Array.isArray(data.pendingOrders) ? data.pendingOrders : [],
         });
         return;
@@ -534,8 +533,7 @@ function AdminReviewDetail({ projectId }) {
       setReductionReason("");
       await loadProject();
       setMessage(
-        `Approved hours reduced to ${formatHours(data.approvedHours)} h. ` +
-          `${formatHours(data.hoursReduced)} h removed (${formatHours(data.coinsDeducted ?? 0)} coins deducted).`
+        `Approved hours reduced to ${formatHours(data.approvedHours)} h. The participant's coin balance was adjusted.`
       );
     } catch (err) {
       setMessage(err.message);
@@ -637,10 +635,14 @@ function AdminReviewDetail({ projectId }) {
     Number(project.approvedHours ?? 0) > 0 && project.status !== "blocked" && !project.blocked;
   const joeUrl = slackJoeToolUrl(project.user?.slackId);
   const isSuperadmin = user?.role === "superadmin";
+  const reviewAward = Number(project.staffStarAward ?? 0);
+  const participantStars = Number(project.user?.totalStars ?? 0);
+  const maxReviewAward = project.staffStarSource === "explore"
+    ? 0
+    : Math.min(2, Math.max(0, 5 - (participantStars - reviewAward)));
   const newHoursMax = Number(project.pendingReviewHours ?? 0);
   const newHoursPlaceholder = formatHours(newHoursMax);
   const approvedHoursNumber = Number.parseFloat(approvedHours);
-  const awardPreview = Number.isFinite(approvedHoursNumber) ? approvedHoursNumber * COINS_PER_APPROVED_HOUR : 0;
   const needsExceedAckPreview =
     !isAlreadyReviewed &&
     selectedAction === "approve" &&
@@ -659,7 +661,6 @@ function AdminReviewDetail({ projectId }) {
     Number.isFinite(reducedApprovedHoursNumber) && reducedApprovedHoursNumber < currentApprovedHours
       ? Number((currentApprovedHours - reducedApprovedHoursNumber).toFixed(2))
       : 0;
-  const reductionPreviewCoins = reductionPreviewHours * COINS_PER_APPROVED_HOUR;
 
   return (
     <main className="admin-review-page">
@@ -708,31 +709,48 @@ function AdminReviewDetail({ projectId }) {
           )}
         </section>
 
+        {!isAlreadyReviewed && project.shipped && ["in-review", "pending-reship"].includes(String(project.status || "").toLowerCase()) ? (
         <section className="admin-review-panel admin-review-stars-panel" aria-label="Project star award">
           <div className="admin-review-stars-heading">
-            <h2>Project stars</h2>
-            <strong>{Number(project.stars ?? 0)} / 5</strong>
+            <h2>Star award</h2>
+            <strong>{participantStars} / 5 participant stars</strong>
           </div>
-          <p>Each project star counts toward the participant&apos;s shop unlock balance.</p>
+          <p>
+            Use staff judgment: award a star when the project and its journal show work you appreciate; use two for a
+            standout project. Your review award can be up to two stars and counts toward the participant&apos;s five-star cap.
+          </p>
+          {project.staffStarSource === "explore" ? (
+            <p>This staff account already awarded this project from Explore, so it cannot add a second award here.</p>
+          ) : null}
           <div className="admin-review-stars-controls">
-            <label>
-              Rating
-              <select value={starsDraft} disabled={starsSaving} onChange={(event) => setStarsDraft(event.target.value)}>
-                {[0, 1, 2, 3, 4, 5].map((value) => (
-                  <option value={value} key={value}>{value} star{value === 1 ? "" : "s"}</option>
-                ))}
-              </select>
-            </label>
+            {project.staffStarSource === "explore" ? (
+              <span>Your review award: already awarded from Explore</span>
+            ) : (
+              <label>
+                Your review award
+                <select
+                  value={starsDraft}
+                  disabled={starsSaving}
+                  onChange={(event) => setStarsDraft(event.target.value)}
+                >
+                  {Array.from({ length: Math.min(2, Math.max(maxReviewAward, reviewAward)) + 1 }, (_, value) => value).map((value) => (
+                    <option value={value} key={value}>{value} star{value === 1 ? "" : "s"}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <span>Project total: {Number(project.stars ?? 0)} stars</span>
             <button
               className="admin-review-submit"
               type="button"
-              disabled={starsSaving || Number(starsDraft) === Number(project.stars ?? 0)}
+              disabled={starsSaving || project.staffStarSource === "explore" || Number(starsDraft) === reviewAward}
               onClick={saveProjectStars}
             >
               {starsSaving ? "Saving…" : "Save stars"}
             </button>
           </div>
         </section>
+        ) : null}
 
         {(project.shipKind === "reship" || project.status === "pending-reship") && project.reshipUpdate ? (
           <section className="admin-review-panel admin-review-reship-update" aria-label="Re-ship update">
@@ -784,7 +802,7 @@ function AdminReviewDetail({ projectId }) {
                 disabled={isAlreadyReviewed}
                 onChange={(event) => handleApprovedHoursChange(event.target.value)}
               />
-              <small>Only this approved amount awards coins: {formatHours(awardPreview)} coins</small>
+              <small>Coin awards follow current program settings.</small>
               {needsExceedAckPreview ? (
                 <>
                   <p className="admin-review-hours-warning">
@@ -846,17 +864,13 @@ function AdminReviewDetail({ projectId }) {
           <section className="admin-review-panel admin-review-reduce-hours" aria-label="Reduce approved hours">
             <h2>Reduce approved hours</h2>
             <p>
-              Lower the cumulative approved hours for this project. Coins earned on this project and the participant&apos;s
-              balance are updated immediately, including YSWS Airtable submissions after prior ships.
+              Lower the cumulative approved hours for this project. The participant&apos;s coin balance and linked YSWS
+              Airtable submissions are updated immediately.
             </p>
             <div className="admin-review-reduce-hours-grid">
               <div>
                 <span>Current approved</span>
                 <strong>{formatHours(project.approvedHours)} h</strong>
-              </div>
-              <div>
-                <span>Coins on project</span>
-                <strong>{formatHours(project.coinsEarned ?? 0)} coins</strong>
               </div>
               <label className="admin-review-reduce-hours-field">
                 <span>New total approved hours</span>
@@ -884,7 +898,7 @@ function AdminReviewDetail({ projectId }) {
             </div>
             {reductionPreviewHours > 0 ? (
               <p className="admin-review-reduce-hours-preview">
-                Removes {formatHours(reductionPreviewHours)} h and deducts {formatHours(reductionPreviewCoins)} coins.
+                Removes {formatHours(reductionPreviewHours)} h. The participant&apos;s coin balance will be adjusted.
               </p>
             ) : null}
             <button
@@ -1028,10 +1042,8 @@ function AdminReviewDetail({ projectId }) {
           >
             <h2 id="admin-review-coins-conflict-title">Participant has already spent coins</h2>
             <p>
-              This reduction needs <strong>{formatHours(coinsConflictModal.coinsToDeduct)} coins</strong>, but the
-              participant only has <strong>{formatHours(coinsConflictModal.userCoins)} coins</strong> available (
-              {formatHours(coinsConflictModal.coinsShortfall)} short). Hours were not changed. Reject pending shop
-              orders below to refund coins, then retry the reduction.
+              The participant&apos;s coin balance is insufficient for this reduction, so approved hours were not changed.
+              Reject pending shop orders below to refund coins, then retry the reduction.
             </p>
 
             <section className="admin-review-coins-orders" aria-label="Pending shop orders">
