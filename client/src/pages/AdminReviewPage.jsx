@@ -631,6 +631,7 @@ function AdminReviewDetail({ projectId }) {
   }
 
   const isAlreadyReviewed = project.reviewed || project.status === "approved";
+  const isOwnProject = Number(project.user?.id) === Number(user?.id);
   const canReduceApprovedHours =
     Number(project.approvedHours ?? 0) > 0 && project.status !== "blocked" && !project.blocked;
   const joeUrl = slackJoeToolUrl(project.user?.slackId);
@@ -719,11 +720,15 @@ function AdminReviewDetail({ projectId }) {
             Use staff judgment: award a star when the project and its journal show work you appreciate; use two for a
             standout project. Your review award can be up to two stars and counts toward the participant&apos;s five-star cap.
           </p>
-          {project.staffStarSource === "explore" ? (
+          {isOwnProject ? (
+            <p role="note">You shipped this project, so you can&apos;t award it stars. Another staff member can review it.</p>
+          ) : project.staffStarSource === "explore" ? (
             <p>This staff account already awarded this project from Explore, so it cannot add a second award here.</p>
           ) : null}
           <div className="admin-review-stars-controls">
-            {project.staffStarSource === "explore" ? (
+            {isOwnProject ? (
+              <span>Review stars are unavailable for your own project.</span>
+            ) : project.staffStarSource === "explore" ? (
               <span>Your review award: already awarded from Explore</span>
             ) : (
               <label>
@@ -743,7 +748,7 @@ function AdminReviewDetail({ projectId }) {
             <button
               className="admin-review-submit"
               type="button"
-              disabled={starsSaving || project.staffStarSource === "explore" || Number(starsDraft) === reviewAward}
+              disabled={isOwnProject || starsSaving || project.staffStarSource === "explore" || Number(starsDraft) === reviewAward}
               onClick={saveProjectStars}
             >
               {starsSaving ? "Saving…" : "Save stars"}

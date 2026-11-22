@@ -2371,7 +2371,6 @@ export async function listExploreProjects({ staffUserId = null } = {}) {
       FROM projects p
       JOIN users u ON u.id = p.user_id
       WHERE p.shipped IS TRUE
-        AND LOWER(COALESCE(p.status, '')) = 'approved'
         AND p.blocked IS NOT TRUE
       ORDER BY p.shipped_at DESC NULLS LAST, p.id DESC
     `,
@@ -2392,6 +2391,7 @@ export async function listExploreProjects({ staffUserId = null } = {}) {
       name: row.owner_slug || row.owner_name || "Venture maker",
       profileImageUrl: row.owner_profile_image_url,
     },
+    isOwnProject: Boolean(staffUserId) && Number(row.user_id) === Number(staffUserId),
     canAwardStar:
       Boolean(staffUserId) &&
       Number(row.user_id) !== Number(staffUserId) &&
@@ -2412,7 +2412,7 @@ export async function awardExploreStar(staffUserId, projectId) {
       [projectId]
     );
     const project = projectResult.rows[0];
-    if (!project || !project.shipped || String(project.status).toLowerCase() !== "approved" || project.blocked) {
+    if (!project || !project.shipped || project.blocked) {
       throw new Error("This project is not available in Explore.");
     }
     if (Number(project.user_id) === Number(staffUserId)) {

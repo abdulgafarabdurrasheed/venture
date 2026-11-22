@@ -74,7 +74,7 @@ export function ExplorePage() {
         {error ? <p className="explore-page__error" role="alert">{error}</p> : null}
         {loading ? <p className="explore-page__empty">Loading projects…</p> : null}
         {!loading && !error && projects.length === 0 ? (
-          <p className="explore-page__empty">No approved shipped projects to explore yet.</p>
+          <p className="explore-page__empty">No shipped projects to explore yet.</p>
         ) : null}
 
         <section className="explore-page__grid" aria-label="Shipped projects">
@@ -107,6 +107,8 @@ export function ExplorePage() {
                   </button>
                 ) : staff && project.alreadyAwardedByStaff ? (
                   <p className="explore-card__staff-note">You&apos;ve already starred this project.</p>
+                ) : staff && project.isOwnProject ? (
+                  <p className="explore-card__staff-note">You can&apos;t star your own project.</p>
                 ) : null}
               </div>
             </article>
