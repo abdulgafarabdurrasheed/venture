@@ -469,7 +469,6 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
       starRewardsRemaining = totalStars - usedClaims - 1;
       amountUsd = 0;
       totalCoins = 0;
-      itemUsage = itemUsage || "Star reward redemption";
     } else {
       if (item.required_stars > 0 && totalStars < item.required_stars) {
         throw new Error(`This item requires ${item.required_stars} star(s) to unlock. You have ${totalStars}.`);
@@ -511,9 +510,7 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
       );
 
       if (!userResult.rows[0]) {
-        throw new Error(
-          `Not enough coins. You have ${formatCoinAmount(userCoins)} coins, but this costs ${formatCoinAmount(totalCoins)} (${formatUsdAmount(amountUsd)}).`
-        );
+        throw new Error("Not enough coins to cover this request.");
       }
       userCoins = Number(userResult.rows[0].coins ?? 0);
     }
@@ -652,18 +649,6 @@ function optionalCoinPriceOrNull(value) {
     throw new Error("Legacy coin price must be a non-negative amount.");
   }
   return price;
-}
-
-function formatCoinAmount(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "0";
-  return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2);
-}
-
-function formatUsdAmount(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "$0.00";
-  return `$${numeric.toFixed(2)}`;
 }
 
 function discountPercentOrNull(value) {
