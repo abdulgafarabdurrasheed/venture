@@ -14,6 +14,8 @@ import {
 } from "./hackatimeAuth.js";
 import { COINS_PER_APPROVED_HOUR } from "./coinRates.js";
 import { MAX_PARTICIPANT_STARS, MAX_REVIEW_STARS_PER_PROJECT } from "./starConstants.js";
+import { exploreStarEligibilityError, isPublicCommunityProject, maxReviewStarAward } from "./communityRules.js";
+import { assertReviewerIsNotProjectOwner } from "./reviewRules.js";
 
 export { COINS_PER_APPROVED_HOUR };
 
@@ -699,7 +701,7 @@ export async function shipProjectForUser(userId, projectId, { reshipUpdate } = {
 
 export { buildDefaultJustificationTemplate } from "./hourJustification.js";
 
-export async function listAdminReviewProjects({ shipSort = "oldest" } = {}) {
+export async function listAdminReviewProjects({ shipSort = "oldest", reviewerUserId = null } = {}) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const direction = shipSort === "newest" ? "DESC" : "ASC";
@@ -717,11 +719,12 @@ export async function listAdminReviewProjects({ shipSort = "oldest" } = {}) {
       ON journal_entries.project_id = projects.id
       AND journal_entries.user_id = projects.user_id
       AND ${journalEntryAfterLaunchOn()}
+    WHERE $1::int IS NULL OR projects.user_id <> $1::int
     GROUP BY projects.id, users.id
     ORDER BY projects.shipped_at ${direction} NULLS LAST, projects.updated_at ${direction}, projects.id ${direction}
   `;
 
-  const result = await pool.query(reviewProjectsSql);
+  const result = await pool.query(reviewProjectsSql, [reviewerUserId]);
   const userIds = [...new Set(result.rows.map((row) => Number(row.user_id)).filter(Number.isFinite))];
   // Refresh Hackatime in the background so the review queue is not blocked (or timed out) in production.
   void Promise.all(
@@ -745,6 +748,7 @@ export async function getAdminReviewProject(projectId, staffUserId = null) {
 
   const ownerResult = await pool.query(`SELECT user_id FROM projects WHERE id = $1`, [projectId]);
   const ownerId = ownerResult.rows[0]?.user_id;
+  if (!ownerId || (staffUserId && Number(ownerId) === Number(staffUserId))) return null;
   if (ownerId) {
     await refreshProjectHackatimeHoursForUser(ownerId).catch((error) => {
       console.error("[review] hackatime refresh failed for project:", projectId, error?.message || error);
@@ -805,6 +809,7 @@ export async function approveAdminReviewProject(adminId, projectId, input = {}) 
 
   const ownerResult = await pool.query(`SELECT user_id FROM projects WHERE id = $1`, [projectId]);
   const ownerId = ownerResult.rows[0]?.user_id;
+  assertReviewerIsNotProjectOwner(adminId, ownerId);
   if (ownerId) {
     await refreshProjectHackatimeHoursForUser(ownerId);
   }
@@ -820,6 +825,7 @@ export async function approveAdminReviewProject(adminId, projectId, input = {}) 
       project.journal_hours = project.total_hours;
     }
     if (!project) throw new Error("Project not found.");
+    assertReviewerIsNotProjectOwner(adminId, project.user_id);
     if (!project.shipped) throw new Error("Project is not in the review queue.");
     if (project.reviewed && project.status === "approved") throw new Error("Project is already approved.");
 
@@ -949,6 +955,8 @@ async function finalizeAdminReviewRemoval(adminId, projectId, input = {}, { cons
 
     const lookup = await client.query("SELECT * FROM projects WHERE id = $1 FOR UPDATE", [projectId]);
     const project = lookup.rows[0];
+    if (!project) throw new Error("Project not found.");
+    assertReviewerIsNotProjectOwner(adminId, project.user_id);
     const isReship = project?.ship_kind === "reship";
     const submissionHours = project ? pendingReviewHours(project) : 0;
     const rejectionStatus = isReship ? "reship-rejected" : "rejected";
@@ -1029,6 +1037,7 @@ export async function blockAdminReviewProject(adminId, projectId, input = {}) {
   const lookup = await pool.query("SELECT * FROM projects WHERE id = $1", [projectId]);
   const project = lookup.rows[0];
   if (!project) throw new Error("Project not found.");
+  assertReviewerIsNotProjectOwner(adminId, project.user_id);
   const submissionHours = loggedHours(project);
 
   const result = await pool.query(
@@ -1104,6 +1113,7 @@ export async function reduceAdminReviewProjectHours(adminId, projectId, input = 
       project.journal_hours = project.total_hours;
     }
     if (!project) throw new Error("Project not found.");
+    assertReviewerIsNotProjectOwner(adminId, project.user_id);
 
     const currentApprovedHours = roundedHours(project.approved_hours);
     if (currentApprovedHours <= 0) {
@@ -1209,12 +1219,13 @@ export async function reduceAdminReviewProjectHours(adminId, projectId, input = 
   }
 }
 
-export async function getParticipantPendingOrdersForReview(projectId) {
+export async function getParticipantPendingOrdersForReview(projectId, reviewerUserId = null) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const projectResult = await pool.query(`SELECT user_id FROM projects WHERE id = $1`, [projectId]);
   const userId = projectResult.rows[0]?.user_id;
   if (!userId) throw new Error("Project not found.");
+  assertReviewerIsNotProjectOwner(reviewerUserId, userId);
 
   const [pendingOrders, userResult] = await Promise.all([
     listPendingShopOrdersForUser(userId),
@@ -1227,12 +1238,13 @@ export async function getParticipantPendingOrdersForReview(projectId) {
   };
 }
 
-export async function rejectParticipantOrderForReview(projectId, orderId) {
+export async function rejectParticipantOrderForReview(projectId, orderId, reviewerUserId = null) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const projectResult = await pool.query(`SELECT user_id FROM projects WHERE id = $1`, [projectId]);
   const ownerId = projectResult.rows[0]?.user_id;
   if (!ownerId) throw new Error("Project not found.");
+  assertReviewerIsNotProjectOwner(reviewerUserId, ownerId);
 
   const orderResult = await pool.query(`SELECT user_id FROM shop_orders WHERE id = $1`, [orderId]);
   const order = orderResult.rows[0];
@@ -1242,12 +1254,17 @@ export async function rejectParticipantOrderForReview(projectId, orderId) {
   }
 
   const rejectedOrder = await rejectShopOrderWithRefund(orderId);
-  const refreshed = await getParticipantPendingOrdersForReview(projectId);
+  const refreshed = await getParticipantPendingOrdersForReview(projectId, reviewerUserId);
   return { order: toReviewParticipantShopOrder(rejectedOrder), ...refreshed };
 }
 
-export async function patchAdminReviewProjectFlags(projectId, input = {}) {
+export async function patchAdminReviewProjectFlags(projectId, input = {}, reviewerUserId = null) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
+
+  const ownerResult = await pool.query(`SELECT user_id FROM projects WHERE id = $1`, [projectId]);
+  const ownerId = ownerResult.rows[0]?.user_id;
+  if (!ownerId) throw new Error("Project not found.");
+  assertReviewerIsNotProjectOwner(reviewerUserId, ownerId);
 
   const hasFraud =
     input.fraudFlag !== undefined || input.fraud_flag !== undefined || input.fraud !== undefined;
@@ -1270,7 +1287,7 @@ export async function patchAdminReviewProjectFlags(projectId, input = {}) {
     throw new Error("Project not found.");
   }
 
-  return getAdminReviewProject(projectId);
+  return getAdminReviewProject(projectId, reviewerUserId);
 }
 
 export async function deleteProjectBySuperadmin(projectId) {
@@ -2265,11 +2282,7 @@ export async function awardStarsToProject(adminId, projectId, stars) {
       [project.user_id]
     );
     const participantStarsBefore = Number(participantStarsResult.rows[0]?.stars ?? 0);
-    const availableForThisAward = Math.max(
-      0,
-      MAX_PARTICIPANT_STARS - (participantStarsBefore - existingStaffStars)
-    );
-    const maxThisAward = Math.min(MAX_REVIEW_STARS_PER_PROJECT, availableForThisAward);
+    const maxThisAward = maxReviewStarAward(participantStarsBefore, existingStaffStars);
     if (stars > maxThisAward) {
       throw new Error(
         `This participant can receive at most ${maxThisAward} more star${maxThisAward === 1 ? "" : "s"} from this review and is capped at ${MAX_PARTICIPANT_STARS} total.`
@@ -2345,62 +2358,6 @@ export async function awardStarsToProject(adminId, projectId, stars) {
   }
 }
 
-export async function listExploreProjects({ staffUserId = null } = {}) {
-  if (!pool) throw new Error("DATABASE_URL is not set.");
-  const result = await pool.query(
-    `
-      SELECT
-        p.id,
-        p.user_id,
-        p.name,
-        p.description,
-        p.project_type,
-        p.playable_url,
-        p.code_url,
-        p.image_url,
-        p.stars,
-        p.shipped_at,
-        u.name AS owner_name,
-        u.slug AS owner_slug,
-        u.profile_image_url AS owner_profile_image_url,
-        u.total_stars AS owner_total_stars,
-        CASE WHEN $1::int IS NULL THEN FALSE ELSE EXISTS (
-          SELECT 1 FROM project_star_awards a
-          WHERE a.project_id = p.id AND a.staff_user_id = $1
-        ) END AS staff_already_awarded
-      FROM projects p
-      JOIN users u ON u.id = p.user_id
-      WHERE p.shipped IS TRUE
-        AND p.blocked IS NOT TRUE
-      ORDER BY p.shipped_at DESC NULLS LAST, p.id DESC
-    `,
-    [staffUserId]
-  );
-
-  return result.rows.map((row) => ({
-    id: Number(row.id),
-    name: row.name,
-    description: row.description,
-    projectType: row.project_type,
-    playableUrl: row.playable_url,
-    codeUrl: row.code_url,
-    imageUrl: row.image_url,
-    stars: Number(row.stars ?? 0),
-    shippedAt: row.shipped_at,
-    owner: {
-      name: row.owner_slug || row.owner_name || "Venture maker",
-      profileImageUrl: row.owner_profile_image_url,
-    },
-    isOwnProject: Boolean(staffUserId) && Number(row.user_id) === Number(staffUserId),
-    canAwardStar:
-      Boolean(staffUserId) &&
-      Number(row.user_id) !== Number(staffUserId) &&
-      !row.staff_already_awarded &&
-      Number(row.owner_total_stars ?? 0) < MAX_PARTICIPANT_STARS,
-    alreadyAwardedByStaff: Boolean(row.staff_already_awarded),
-  }));
-}
-
 export async function awardExploreStar(staffUserId, projectId) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
   const client = await pool.connect();
@@ -2412,7 +2369,7 @@ export async function awardExploreStar(staffUserId, projectId) {
       [projectId]
     );
     const project = projectResult.rows[0];
-    if (!project || !project.shipped || project.blocked) {
+    if (!isPublicCommunityProject(project)) {
       throw new Error("This project is not available in Explore.");
     }
     if (Number(project.user_id) === Number(staffUserId)) {
@@ -2420,20 +2377,23 @@ export async function awardExploreStar(staffUserId, projectId) {
     }
 
     await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [project.user_id]);
-    const alreadyAwarded = await client.query(
-      `SELECT id FROM project_star_awards WHERE project_id = $1 AND staff_user_id = $2`,
+    const existingAward = await client.query(
+      `SELECT id FROM project_star_awards WHERE project_id = $1 AND staff_user_id = $2 FOR UPDATE`,
       [projectId, staffUserId]
     );
-    if (alreadyAwarded.rowCount) throw new Error("You have already awarded this project a star.");
 
     const participantStarsResult = await client.query(
       `SELECT COALESCE(SUM(stars), 0)::int AS stars FROM projects WHERE user_id = $1`,
       [project.user_id]
     );
     const participantStarsBefore = Number(participantStarsResult.rows[0]?.stars ?? 0);
-    if (participantStarsBefore >= MAX_PARTICIPANT_STARS) {
-      throw new Error(`This participant has reached the ${MAX_PARTICIPANT_STARS}-star limit.`);
-    }
+    const eligibilityError = exploreStarEligibilityError({
+      project,
+      staffUserId,
+      participantStars: participantStarsBefore,
+      alreadyAwarded: existingAward.rowCount > 0,
+    });
+    if (eligibilityError) throw new Error(eligibilityError);
 
     await client.query(
       `INSERT INTO project_star_awards (project_id, staff_user_id, stars, source) VALUES ($1, $2, 1, 'explore')`,

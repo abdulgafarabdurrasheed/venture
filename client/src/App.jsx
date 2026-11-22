@@ -17,9 +17,12 @@ import { ExplorePage } from "./pages/ExplorePage.jsx";
 import { JournalingReviewPage } from "./pages/JournalingReviewPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
 import { ProjectsPage } from "./pages/ProjectsPage.jsx";
+import { ParticipantPage } from "./pages/ParticipantPage.jsx";
+import { PublicProjectPage } from "./pages/PublicProjectPage.jsx";
 import { ShopPage } from "./pages/ShopPage.jsx";
 import { TestPage } from "./pages/TestPage.jsx";
 import { UserAreaPage } from "./pages/UserAreaPage.jsx";
+import { decodePathSegment } from "./utils/pathSegments.js";
 
 const PUBLIC_PATHS = new Set(["/", "/rules", "/rsvp"]);
 const PLATFORM_DEFAULT = "/projects";
@@ -54,7 +57,8 @@ export default function App() {
   const isAnyAdminPath = pathname === "/admin" || pathname.startsWith("/admin/");
   const isReviewPath = pathname === "/admin/review" || pathname.startsWith("/admin/review/");
   const isJournalingPath = pathname === "/journaling" || pathname.startsWith("/journaling/");
-  const isPublicPath = PUBLIC_PATHS.has(pathname) || isJournalingPath;
+  const isCommunityPublicPath = pathname === "/explore" || pathname.startsWith("/project/") || pathname.startsWith("/participants/");
+  const isPublicPath = PUBLIC_PATHS.has(pathname) || isJournalingPath || isCommunityPublicPath;
   const needsPlatformGate = !isLocalhost && isPlatformPath(pathname) && !isPublicPath;
 
   const loadMe = useCallback(async () => {
@@ -129,10 +133,33 @@ export default function App() {
     return <PlatformGate onUnlocked={loadPlatformStatus} />;
   }
 
+  const contextValue = {
+    user: auth.user,
+    status: auth.status,
+    reload: loadMe,
+  };
+
   if (isPublicPath) {
     if (isJournalingPath) {
       const [, , projectId, token] = pathname.split("/");
       return <JournalingReviewPage projectId={projectId} token={token} />;
+    }
+    if (pathname === "/explore") {
+      return <AuthContext.Provider value={contextValue}><ExplorePage /></AuthContext.Provider>;
+    }
+    if (pathname.startsWith("/project/")) {
+      return (
+        <AuthContext.Provider value={contextValue}>
+          <PublicProjectPage projectId={decodePathSegment(pathname.slice("/project/".length))} />
+        </AuthContext.Provider>
+      );
+    }
+    if (pathname.startsWith("/participants/")) {
+      return (
+        <AuthContext.Provider value={contextValue}>
+          <ParticipantPage identifier={decodePathSegment(pathname.slice("/participants/".length))} />
+        </AuthContext.Provider>
+      );
     }
     if (pathname === "/rsvp") {
       return <RsvpPage />;
@@ -172,12 +199,6 @@ export default function App() {
     window.location.replace(PLATFORM_DEFAULT);
     return null;
   }
-
-  const contextValue = {
-    user: auth.user,
-    status: auth.status,
-    reload: loadMe,
-  };
 
   let page;
   switch (pathname) {
