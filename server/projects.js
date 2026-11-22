@@ -13,6 +13,7 @@ import {
   sumHackatimeHoursForNames,
 } from "./hackatimeAuth.js";
 import { COINS_PER_APPROVED_HOUR } from "./coinRates.js";
+import { MAX_PARTICIPANT_STARS, MAX_REVIEW_STARS_PER_PROJECT } from "./starConstants.js";
 
 export { COINS_PER_APPROVED_HOUR };
 
@@ -189,6 +190,7 @@ export async function ensureProjectsTable() {
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_projects_user_name_lower ON projects(user_id, LOWER(name))`);
+  await ensureProjectStarAwardsTable();
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS journal_entries (
@@ -226,6 +228,61 @@ export async function ensureProjectsTable() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_journal_entries_user_project ON journal_entries(user_id, project_id)`);
   await ensureProjectReviewFeedbackTable();
   await ensureYswsProjectSubmissionsTable();
+}
+
+async function ensureProjectStarAwardsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS project_star_awards (
+      id BIGSERIAL PRIMARY KEY,
+      project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      staff_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      stars INTEGER NOT NULL CHECK (stars >= 0),
+      source TEXT NOT NULL DEFAULT 'legacy' CHECK (source IN ('review', 'explore', 'legacy')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_project_star_awards_staff_project
+    ON project_star_awards(project_id, staff_user_id)
+    WHERE staff_user_id IS NOT NULL
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_project_star_awards_legacy_project
+    ON project_star_awards(project_id)
+    WHERE staff_user_id IS NULL AND source = 'legacy'
+  `);
+
+  // Preserve project stars assigned before awards were attributable to staff.
+  await pool.query(`
+    INSERT INTO project_star_awards (project_id, staff_user_id, stars, source)
+    SELECT p.id, NULL, p.stars, 'legacy'
+    FROM projects p
+    WHERE COALESCE(p.stars, 0) > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM project_star_awards a WHERE a.project_id = p.id
+      )
+    ON CONFLICT DO NOTHING
+  `);
+  await pool.query(`
+    UPDATE projects p
+    SET stars = COALESCE((
+      SELECT SUM(a.stars)::int FROM project_star_awards a WHERE a.project_id = p.id
+    ), 0)
+    WHERE p.stars IS DISTINCT FROM COALESCE((
+      SELECT SUM(a.stars)::int FROM project_star_awards a WHERE a.project_id = p.id
+    ), 0)
+  `);
+  await pool.query(`
+    UPDATE users u
+    SET total_stars = LEAST($1, COALESCE((
+      SELECT SUM(p.stars)::int FROM projects p WHERE p.user_id = u.id
+    ), 0)),
+        updated_at = NOW()
+    WHERE u.total_stars IS DISTINCT FROM LEAST($1, COALESCE((
+      SELECT SUM(p.stars)::int FROM projects p WHERE p.user_id = u.id
+    ), 0))
+  `, [MAX_PARTICIPANT_STARS]);
 }
 
 async function ensureProjectReviewFeedbackTable() {
@@ -683,7 +740,7 @@ export async function listAdminReviewProjects({ shipSort = "oldest" } = {}) {
   };
 }
 
-export async function getAdminReviewProject(projectId) {
+export async function getAdminReviewProject(projectId, staffUserId = null) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
 
   const ownerResult = await pool.query(`SELECT user_id FROM projects WHERE id = $1`, [projectId]);
@@ -702,7 +759,8 @@ export async function getAdminReviewProject(projectId) {
         users.email AS user_email,
         users.slug AS user_slug,
         users.profile_image_url AS user_profile_image_url,
-        users.slack_id AS user_slack_id
+        users.slack_id AS user_slack_id,
+        users.total_stars AS user_total_stars
       FROM projects
       JOIN users ON users.id = projects.user_id
       LEFT JOIN journal_entries
@@ -717,6 +775,15 @@ export async function getAdminReviewProject(projectId) {
 
   const project = result.rows[0] ? toAdminReviewProject(result.rows[0]) : null;
   if (!project) return null;
+
+  if (staffUserId) {
+    const awardResult = await pool.query(
+      `SELECT stars, source FROM project_star_awards WHERE project_id = $1 AND staff_user_id = $2`,
+      [projectId, staffUserId]
+    );
+    project.staffStarAward = Number(awardResult.rows[0]?.stars ?? 0);
+    project.staffStarSource = awardResult.rows[0]?.source ?? null;
+  }
 
   const [projectWithFeedback] = await attachReviewFeedbackToProjects([project]);
   const journalEntries = await listJournalEntriesForUserProject(projectWithFeedback.userId, projectWithFeedback.id);
@@ -1228,6 +1295,17 @@ export async function deleteProjectBySuperadmin(projectId) {
     }
     
     const result = await client.query(`DELETE FROM projects WHERE id = $1`, [projectId]);
+    await client.query(
+      `
+        UPDATE users u
+        SET total_stars = LEAST($1, COALESCE((
+          SELECT SUM(p.stars)::int FROM projects p WHERE p.user_id = u.id
+        ), 0)),
+            updated_at = NOW()
+        WHERE u.id = $2
+      `,
+      [MAX_PARTICIPANT_STARS, row.user_id]
+    );
     
     await client.query("COMMIT");
     return result.rowCount > 0;
@@ -1241,15 +1319,40 @@ export async function deleteProjectBySuperadmin(projectId) {
 
 export async function deleteProjectForUser(userId, projectId) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const checkResult = await client.query(
+      "SELECT shipped FROM projects WHERE id = $1 AND user_id = $2 FOR UPDATE",
+      [projectId, userId]
+    );
+    const project = checkResult.rows[0];
+    if (!project) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    if (project.shipped) throw new Error("Cannot delete a project that has been shipped.");
 
-  const checkResult = await pool.query("SELECT shipped FROM projects WHERE id = $1 AND user_id = $2", [projectId, userId]);
-  const project = checkResult.rows[0];
-
-  if (!project) return false;
-  if (project.shipped) throw new Error("Cannot delete a project that has been shipped.");
-
-  const result = await pool.query("DELETE FROM projects WHERE id = $1 AND user_id = $2", [projectId, userId]);
-  return result.rowCount > 0;
+    const result = await client.query("DELETE FROM projects WHERE id = $1 AND user_id = $2", [projectId, userId]);
+    await client.query(
+      `
+        UPDATE users u
+        SET total_stars = LEAST($1, COALESCE((
+          SELECT SUM(p.stars)::int FROM projects p WHERE p.user_id = u.id
+        ), 0)),
+            updated_at = NOW()
+        WHERE u.id = $2
+      `,
+      [MAX_PARTICIPANT_STARS, userId]
+    );
+    await client.query("COMMIT");
+    return result.rowCount > 0;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listJournalEntriesForUserProject(userId, projectId) {
@@ -2012,6 +2115,7 @@ function toAdminReviewProject(row) {
       slug: row.user_slug,
       profileImageUrl: row.user_profile_image_url,
       slackId: row.user_slack_id,
+      totalStars: Number(row.user_total_stars ?? 0),
     },
     pendingReviewHours: pendingReviewHours(row),
   };
@@ -2128,8 +2232,8 @@ function toIsoString(value) {
 export async function awardStarsToProject(adminId, projectId, stars) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
   
-  if (!Number.isInteger(stars) || stars < 0 || stars > 5) {
-    throw new Error("Stars must be an integer between 0 and 5.");
+  if (!Number.isInteger(stars) || stars < 0 || stars > MAX_REVIEW_STARS_PER_PROJECT) {
+    throw new Error(`Review awards must be between 0 and ${MAX_REVIEW_STARS_PER_PROJECT} stars.`);
   }
 
   const client = await pool.connect();
@@ -2139,42 +2243,241 @@ export async function awardStarsToProject(adminId, projectId, stars) {
     const projectResult = await client.query("SELECT * FROM projects WHERE id = $1 FOR UPDATE", [projectId]);
     const project = projectResult.rows[0];
     if (!project) throw new Error("Project not found.");
+    if (!isPendingReviewProject(project)) {
+      throw new Error("Review star awards are only available while a project is under review.");
+    }
+    if (Number(project.user_id) === Number(adminId)) {
+      throw new Error("You cannot award a star to a project you shipped.");
+    }
 
-    const starDiff = stars - (project.stars || 0);
+    await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [project.user_id]);
+    const existingAwardResult = await client.query(
+      `SELECT stars, source FROM project_star_awards WHERE project_id = $1 AND staff_user_id = $2 FOR UPDATE`,
+      [projectId, adminId]
+    );
+    const existingAward = existingAwardResult.rows[0];
+    if (existingAward?.source === "explore") {
+      throw new Error("You already awarded this project a star from Explore.");
+    }
+    const existingStaffStars = Number(existingAward?.stars ?? 0);
+    const participantStarsResult = await client.query(
+      `SELECT COALESCE(SUM(stars), 0)::int AS stars FROM projects WHERE user_id = $1`,
+      [project.user_id]
+    );
+    const participantStarsBefore = Number(participantStarsResult.rows[0]?.stars ?? 0);
+    const availableForThisAward = Math.max(
+      0,
+      MAX_PARTICIPANT_STARS - (participantStarsBefore - existingStaffStars)
+    );
+    const maxThisAward = Math.min(MAX_REVIEW_STARS_PER_PROJECT, availableForThisAward);
+    if (stars > maxThisAward) {
+      throw new Error(
+        `This participant can receive at most ${maxThisAward} more star${maxThisAward === 1 ? "" : "s"} from this review and is capped at ${MAX_PARTICIPANT_STARS} total.`
+      );
+    }
+
+    if (stars === 0) {
+      if (existingAward?.source === "review") {
+        await client.query(
+          `UPDATE project_star_awards SET stars = 0, updated_at = NOW() WHERE project_id = $1 AND staff_user_id = $2 AND source = 'review'`,
+          [projectId, adminId]
+        );
+      }
+    } else {
+      await client.query(
+        `
+          INSERT INTO project_star_awards (project_id, staff_user_id, stars, source)
+          VALUES ($1, $2, $3, 'review')
+          ON CONFLICT (project_id, staff_user_id) WHERE staff_user_id IS NOT NULL
+          DO UPDATE SET stars = EXCLUDED.stars, source = 'review', updated_at = NOW()
+        `,
+        [projectId, adminId, stars]
+      );
+    }
+
+    const newProjectStarsResult = await client.query(
+      `SELECT COALESCE(SUM(stars), 0)::int AS stars FROM project_star_awards WHERE project_id = $1`,
+      [projectId]
+    );
+    const projectStars = Number(newProjectStarsResult.rows[0]?.stars ?? 0);
+    const starDiff = projectStars - Number(project.stars ?? 0);
 
     const updatedProjectResult = await client.query(
       `UPDATE projects SET stars = $1, updated_at = NOW() WHERE id = $2 RETURNING *, total_hours AS journal_hours`,
-      [stars, projectId]
+      [projectStars, projectId]
     );
 
-    if (starDiff !== 0) {
-      await client.query(
-        `UPDATE users SET total_stars = total_stars + $1, updated_at = NOW() WHERE id = $2`,
-        [starDiff, project.user_id]
-      );
-    }
+    const participantStarsAfter = Math.min(
+      MAX_PARTICIPANT_STARS,
+      participantStarsBefore + (Number(stars) - existingStaffStars)
+    );
+    await client.query(
+      `UPDATE users SET total_stars = $1, updated_at = NOW() WHERE id = $2`,
+      [participantStarsAfter, project.user_id]
+    );
 
     await client.query("COMMIT");
     if (starDiff > 0) {
       await insertNotification(
         project.user_id,
         "project_stars_updated",
-        `Your project "${project.name}" received ${starDiff} additional star${starDiff === 1 ? "" : "s"}.`,
-        { projectId: Number(project.id), stars, starsAdded: starDiff }
+        `A staff member awarded "${project.name}" ${starDiff} star${starDiff === 1 ? "" : "s"}.`,
+        { projectId: Number(project.id), stars: projectStars, starsAdded: starDiff }
       );
     } else if (starDiff < 0) {
       await insertNotification(
         project.user_id,
         "project_stars_updated",
-        `The star rating for "${project.name}" changed from ${project.stars} to ${stars}.`,
-        { projectId: Number(project.id), stars, starsChanged: starDiff }
+        `The star count for "${project.name}" changed by ${starDiff}.`,
+        { projectId: Number(project.id), stars: projectStars, starsChanged: starDiff }
       );
     }
-    return toPublicProject(updatedProjectResult.rows[0]);
+    return {
+      project: toPublicProject(updatedProjectResult.rows[0]),
+      staffStarAward: stars,
+      participantTotalStars: participantStarsAfter,
+    };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
+  }
+}
+
+export async function listExploreProjects({ staffUserId = null } = {}) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+  const result = await pool.query(
+    `
+      SELECT
+        p.id,
+        p.user_id,
+        p.name,
+        p.description,
+        p.project_type,
+        p.playable_url,
+        p.code_url,
+        p.image_url,
+        p.stars,
+        p.shipped_at,
+        u.name AS owner_name,
+        u.slug AS owner_slug,
+        u.profile_image_url AS owner_profile_image_url,
+        u.total_stars AS owner_total_stars,
+        CASE WHEN $1::int IS NULL THEN FALSE ELSE EXISTS (
+          SELECT 1 FROM project_star_awards a
+          WHERE a.project_id = p.id AND a.staff_user_id = $1
+        ) END AS staff_already_awarded
+      FROM projects p
+      JOIN users u ON u.id = p.user_id
+      WHERE p.shipped IS TRUE
+        AND p.blocked IS NOT TRUE
+      ORDER BY p.shipped_at DESC NULLS LAST, p.id DESC
+    `,
+    [staffUserId]
+  );
+
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    name: row.name,
+    description: row.description,
+    projectType: row.project_type,
+    playableUrl: row.playable_url,
+    codeUrl: row.code_url,
+    imageUrl: row.image_url,
+    stars: Number(row.stars ?? 0),
+    shippedAt: row.shipped_at,
+    owner: {
+      name: row.owner_slug || row.owner_name || "Venture maker",
+      profileImageUrl: row.owner_profile_image_url,
+    },
+    isOwnProject: Boolean(staffUserId) && Number(row.user_id) === Number(staffUserId),
+    canAwardStar:
+      Boolean(staffUserId) &&
+      Number(row.user_id) !== Number(staffUserId) &&
+      !row.staff_already_awarded &&
+      Number(row.owner_total_stars ?? 0) < MAX_PARTICIPANT_STARS,
+    alreadyAwardedByStaff: Boolean(row.staff_already_awarded),
+  }));
+}
+
+export async function awardExploreStar(staffUserId, projectId) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+  const client = await pool.connect();
+  let notification = null;
+  try {
+    await client.query("BEGIN");
+    const projectResult = await client.query(
+      `SELECT * FROM projects WHERE id = $1 FOR UPDATE`,
+      [projectId]
+    );
+    const project = projectResult.rows[0];
+    if (!project || !project.shipped || project.blocked) {
+      throw new Error("This project is not available in Explore.");
+    }
+    if (Number(project.user_id) === Number(staffUserId)) {
+      throw new Error("You cannot star a project that you shipped.");
+    }
+
+    await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [project.user_id]);
+    const alreadyAwarded = await client.query(
+      `SELECT id FROM project_star_awards WHERE project_id = $1 AND staff_user_id = $2`,
+      [projectId, staffUserId]
+    );
+    if (alreadyAwarded.rowCount) throw new Error("You have already awarded this project a star.");
+
+    const participantStarsResult = await client.query(
+      `SELECT COALESCE(SUM(stars), 0)::int AS stars FROM projects WHERE user_id = $1`,
+      [project.user_id]
+    );
+    const participantStarsBefore = Number(participantStarsResult.rows[0]?.stars ?? 0);
+    if (participantStarsBefore >= MAX_PARTICIPANT_STARS) {
+      throw new Error(`This participant has reached the ${MAX_PARTICIPANT_STARS}-star limit.`);
+    }
+
+    await client.query(
+      `INSERT INTO project_star_awards (project_id, staff_user_id, stars, source) VALUES ($1, $2, 1, 'explore')`,
+      [projectId, staffUserId]
+    );
+    const projectStars = Number(project.stars ?? 0) + 1;
+    await client.query(
+      `UPDATE projects SET stars = $1, updated_at = NOW() WHERE id = $2`,
+      [projectStars, projectId]
+    );
+    const participantTotalStars = Math.min(MAX_PARTICIPANT_STARS, participantStarsBefore + 1);
+    await client.query(
+      `UPDATE users SET total_stars = $1, updated_at = NOW() WHERE id = $2`,
+      [participantTotalStars, project.user_id]
+    );
+    await client.query("COMMIT");
+
+    notification = {
+      userId: project.user_id,
+      projectName: project.name,
+      projectId: Number(project.id),
+      projectStars,
+      participantTotalStars,
+    };
+    return {
+      project: { id: Number(project.id), stars: projectStars },
+      participantTotalStars,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+    if (notification) {
+      await insertNotification(
+        notification.userId,
+        "project_stars_updated",
+        `A staff member awarded "${notification.projectName}" a star.`,
+        {
+          projectId: notification.projectId,
+          stars: notification.projectStars,
+          starsAdded: 1,
+        }
+      );
+    }
   }
 }

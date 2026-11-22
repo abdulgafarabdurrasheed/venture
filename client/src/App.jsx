@@ -13,6 +13,7 @@ import { AdminShopPage } from "./pages/AdminShopPage.jsx";
 import { AdminStatsPage } from "./pages/AdminStatsPage.jsx";
 import { AdminUsersPage } from "./pages/AdminUsersPage.jsx";
 import { FaqPage } from "./pages/FaqPage.jsx";
+import { ExplorePage } from "./pages/ExplorePage.jsx";
 import { JournalingReviewPage } from "./pages/JournalingReviewPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
 import { ProjectsPage } from "./pages/ProjectsPage.jsx";
@@ -188,6 +189,9 @@ export default function App() {
       break;
     case "/projects":
       page = <ProjectsPage />;
+      break;
+    case "/explore":
+      page = <ExplorePage />;
       break;
     case "/shop":
       page = <ShopPage />;

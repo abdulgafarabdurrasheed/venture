@@ -2,10 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "../api/client.js";
 import {
-  COINS_PER_APPROVED_HOUR,
-  COINS_PER_USD,
   MIN_PURCHASE_USD,
-  USD_PER_APPROVED_HOUR,
   formatCoins,
   formatUsd,
   parsePurchaseUsd,
@@ -25,7 +22,7 @@ function emptyAcknowledgments() {
   return Object.fromEntries(GRANT_ACKNOWLEDGMENTS.map((_, index) => [index, false]));
 }
 
-export function ShopPurchaseModal({ item, userCoins, userStars = 0, onClose, onPurchased }) {
+export function ShopPurchaseModal({ item, userCoins, userStars = 0, starRewardsRemaining = 0, onClose, onPurchased }) {
   const [amountUsd, setAmountUsd] = useState("");
   const [itemUsage, setItemUsage] = useState("");
   const [message, setMessage] = useState("");
@@ -63,19 +60,26 @@ export function ShopPurchaseModal({ item, userCoins, userStars = 0, onClose, onP
   const hasValidUsd = parsedUsd !== null;
   const totalCoins = hasValidUsd ? usdToCoins(parsedUsd) : null;
   const belowMinimum =
-    amountUsd !== "" && Number.isFinite(Number(amountUsd)) && Number(amountUsd) < MIN_PURCHASE_USD;
+    !item.starReward && amountUsd !== "" && Number.isFinite(Number(amountUsd)) && Number(amountUsd) < MIN_PURCHASE_USD;
   const availableCoins = Number(userCoins) || 0;
   const availableStars = Number(userStars) || 0;
+  const availableRewardClaims = Number(starRewardsRemaining) || 0;
+  const isStarReward = Boolean(item.starReward);
   const requiredStars = Number(item.requiredStars) || 0;
   const hasEnoughStars = availableStars >= requiredStars;
-  const hasEnoughCoins = totalCoins !== null && availableCoins >= totalCoins;
+  const hasEnoughCoins = isStarReward || (totalCoins !== null && availableCoins >= totalCoins);
   const hasItemUsage = itemUsage.trim().length > 0;
-  const canPurchase = hasEnoughStars && hasEnoughCoins && hasItemUsage && !submitting;
+  const hasRewardClaim = availableRewardClaims > 0;
+  const canPurchase = hasEnoughStars && hasEnoughCoins && (isStarReward ? hasRewardClaim : hasItemUsage) && !submitting;
   const allAcknowledged = GRANT_ACKNOWLEDGMENTS.every((_, index) => acknowledgments[index]);
 
   function handleBuyClick() {
     if (!canPurchase) return;
     setMessage("");
+    if (isStarReward) {
+      handleConfirmPurchase();
+      return;
+    }
     setShowConfirm(true);
   }
 
@@ -89,14 +93,14 @@ export function ShopPurchaseModal({ item, userCoins, userStars = 0, onClose, onP
   }
 
   async function handleConfirmPurchase() {
-    if (!canPurchase || !allAcknowledged || submitting) return;
+    if (!canPurchase || (!isStarReward && !allAcknowledged) || submitting) return;
 
     setMessage("");
     setSubmitting(true);
     try {
       const response = await apiFetch(`/api/shop/items/${item.id}/buy`, {
         method: "POST",
-        body: JSON.stringify({ amountUsd: parsedUsd, itemUsage: itemUsage.trim() }),
+        body: JSON.stringify({ amountUsd: isStarReward ? null : parsedUsd, itemUsage: itemUsage.trim() }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to buy item.");
@@ -118,7 +122,7 @@ export function ShopPurchaseModal({ item, userCoins, userStars = 0, onClose, onP
         className="shop-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={`${item.name} purchase`}
+        aria-label={`${item.name} ${isStarReward ? "reward claim" : "purchase"}`}
         onClick={(event) => event.stopPropagation()}
       >
         <button type="button" className="shop-modal__close" onClick={onClose} aria-label="Close">
@@ -127,20 +131,21 @@ export function ShopPurchaseModal({ item, userCoins, userStars = 0, onClose, onP
 
         <img className="shop-modal__image" src={resolveShopItemImage(item)} alt="" />
         <h2 className="shop-modal__title">{item.name}</h2>
-        <p className="shop-modal__description">{item.description || "Travel reward"}</p>
+        <p className="shop-modal__description">{item.description || (isStarReward ? "Venture star reward" : "Travel reward")}</p>
 
-        {requiredStars > 0 ? (
+        {isStarReward ? (
+          <p className="shop-modal__warning">
+            {hasEnoughStars
+              ? `This reward needs ${requiredStars} star${requiredStars === 1 ? "" : "s"}; you have ${availableStars}. ${availableRewardClaims} reward claim${availableRewardClaims === 1 ? "" : "s"} remaining.`
+              : `This reward needs ${requiredStars} star${requiredStars === 1 ? "" : "s"}. You have ${availableStars}.`}
+          </p>
+        ) : requiredStars > 0 ? (
           <p className="shop-modal__warning">
             {hasEnoughStars
               ? `Star unlock met: ${availableStars} available, ${requiredStars} required.`
               : `This grant requires ${requiredStars} stars. You have ${availableStars}.`}
           </p>
         ) : null}
-
-        <p className="shop-modal__rates">
-          Rate: {formatUsd(USD_PER_APPROVED_HOUR)}/approved hour · 1 approved hour = {COINS_PER_APPROVED_HOUR} coins (
-          {COINS_PER_USD} coins per $1)
-        </p>
 
         {item.maxPerPerson ? (
           <div className="shop-modal__row">
@@ -155,51 +160,64 @@ export function ShopPurchaseModal({ item, userCoins, userStars = 0, onClose, onP
           </a>
         ) : null}
 
-        <label className="shop-modal__field">
-          <span>Amount needed ($) — min {formatUsd(MIN_PURCHASE_USD)}</span>
-          <input
-            type="number"
-            min={MIN_PURCHASE_USD}
-            step="0.01"
-            inputMode="decimal"
-            placeholder={MIN_PURCHASE_USD.toFixed(2)}
-            value={amountUsd}
-            onChange={(event) => setAmountUsd(event.target.value)}
-          />
-        </label>
+        {isStarReward ? (
+          <>
+            <p className="shop-modal__total">This claim uses one of your star reward slots. No coins are charged.</p>
+            <label className="shop-modal__field">
+              <span>Notes for staff (optional)</span>
+              <textarea
+                rows={4}
+                maxLength={2000}
+                placeholder="Add a size, color, or other fulfillment detail if needed."
+                value={itemUsage}
+                onChange={(event) => setItemUsage(event.target.value)}
+              />
+            </label>
+          </>
+        ) : (
+          <>
+            <label className="shop-modal__field">
+              <span>Amount needed ($) — min {formatUsd(MIN_PURCHASE_USD)}</span>
+              <input
+                type="number"
+                min={MIN_PURCHASE_USD}
+                step="0.01"
+                inputMode="decimal"
+                placeholder={MIN_PURCHASE_USD.toFixed(2)}
+                value={amountUsd}
+                onChange={(event) => setAmountUsd(event.target.value)}
+              />
+            </label>
 
-        <label className="shop-modal__field">
-          <span>What will you specifically buy with this grant? *</span>
-          <textarea
-            required
-            rows={4}
-            maxLength={2000}
-            placeholder="e.g. Round-trip train tickets from Milan to Florence for my project demo trip"
-            value={itemUsage}
-            onChange={(event) => setItemUsage(event.target.value)}
-          />
-        </label>
+            <label className="shop-modal__field">
+              <span>What will you specifically buy with this grant? *</span>
+              <textarea
+                required
+                rows={4}
+                maxLength={2000}
+                placeholder="Describe what you plan to buy with the grant."
+                value={itemUsage}
+                onChange={(event) => setItemUsage(event.target.value)}
+              />
+            </label>
 
-        <div className="shop-modal__row">
-          <span>Your balance</span>
-          <strong>{formatCoins(availableCoins)} coins</strong>
-        </div>
+            <div className="shop-modal__row">
+              <span>Your balance</span>
+              <strong>{formatCoins(availableCoins)} coins</strong>
+            </div>
 
-        <div className="shop-modal__total">
-          <span>Coins required</span>
-          <strong>{totalCoins !== null ? `${formatCoins(totalCoins)} coins` : "—"}</strong>
-        </div>
+          </>
+        )}
 
         {belowMinimum ? (
           <p className="shop-modal__warning">Minimum purchase is {formatUsd(MIN_PURCHASE_USD)}.</p>
         ) : null}
-        {hasValidUsd && !hasEnoughCoins ? (
+        {!isStarReward && hasValidUsd && !hasEnoughCoins ? (
           <p className="shop-modal__warning">
-            Not enough coins. You have {formatCoins(availableCoins)} coins, but {formatUsd(parsedUsd)} requires{" "}
-            {formatCoins(totalCoins)} coins.
+            Your coin balance is not sufficient for this request.
           </p>
         ) : null}
-        {hasValidUsd && hasEnoughCoins && !hasItemUsage ? (
+        {!isStarReward && hasValidUsd && hasEnoughCoins && !hasItemUsage ? (
           <p className="shop-modal__warning">Describe what you will buy with this grant before purchasing.</p>
         ) : null}
         {message ? <p className="shop-modal__warning">{message}</p> : null}
@@ -210,7 +228,7 @@ export function ShopPurchaseModal({ item, userCoins, userStars = 0, onClose, onP
           disabled={!canPurchase}
           onClick={handleBuyClick}
         >
-          Buy
+          {isStarReward ? "Claim reward" : "Buy"}
         </button>
 
         {showConfirm ? (

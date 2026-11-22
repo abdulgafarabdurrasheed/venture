@@ -36,6 +36,7 @@ import { apiRateLimiter, authRateLimiter, globalRateLimiter, spaRateLimiter } fr
 import {
   createShopItem,
   deleteShopItem,
+  getStarRewardSummaryForUser,
   listShopItems,
   listShopOrders,
   markShopOrderFulfilled,
@@ -47,6 +48,7 @@ import {
 } from "./shopItems.js";
 import {
   approveAdminReviewProject, awardStarsToProject,
+  awardExploreStar, listExploreProjects,
   blockAdminReviewProject,
   createProjectForUser,
   getProjectForUser,
@@ -301,7 +303,10 @@ app.get("/api/test", async (req, res) => {
 app.get("/api/shop/items", async (req, res) => {
   try {
     const items = await listShopItems();
-    res.json({ items });
+    const starRewards = req.session?.userId
+      ? await getStarRewardSummaryForUser(req.session.userId)
+      : null;
+    res.json({ items, starRewards });
   } catch (error) {
     console.error("Failed to load shop items:", error);
     res.status(500).json({ error: "Failed to load shop items." });
@@ -771,7 +776,7 @@ app.get("/api/admin/review/projects", requireStaffReview, async (req, res) => {
 
 app.get("/api/admin/review/projects/:id", requireStaffReview, async (req, res) => {
   try {
-    const reviewProject = await getAdminReviewProject(req.params.id);
+    const reviewProject = await getAdminReviewProject(req.params.id, req.session.userId);
     if (!reviewProject) {
       res.status(404).json({ error: "Project not found." });
       return;
@@ -786,8 +791,32 @@ app.get("/api/admin/review/projects/:id", requireStaffReview, async (req, res) =
 app.post("/api/admin/review/projects/:id/star", requireStaffReview, async (req, res) => {
   try {
     const { stars } = req.body;
-    const project = await awardStarsToProject(req.session.userId, req.params.id, Number(stars));
-    res.json(project);
+    const result = await awardStarsToProject(req.session.userId, req.params.id, Number(stars));
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: clientErrorMessage(error) });
+  }
+});
+
+app.get("/api/explore/projects", async (req, res) => {
+  try {
+    let staffUserId = null;
+    if (req.session?.userId) {
+      const user = await getUserById(req.session.userId);
+      if (canAccessStaffReview(effectiveRole(user))) staffUserId = req.session.userId;
+    }
+    const projects = await listExploreProjects({ staffUserId });
+    res.json({ projects });
+  } catch (error) {
+    console.error("Failed to load Explore projects:", error);
+    res.status(500).json({ error: "Failed to load Explore projects." });
+  }
+});
+
+app.post("/api/explore/projects/:id/star", requireStaffReview, async (req, res) => {
+  try {
+    const result = await awardExploreStar(req.session.userId, req.params.id);
+    res.json(result);
   } catch (error) {
     res.status(400).json({ error: clientErrorMessage(error) });
   }
