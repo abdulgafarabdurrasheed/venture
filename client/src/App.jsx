@@ -21,7 +21,7 @@ import { ShopPage } from "./pages/ShopPage.jsx";
 import { TestPage } from "./pages/TestPage.jsx";
 import { UserAreaPage } from "./pages/UserAreaPage.jsx";
 
-const PUBLIC_PATHS = new Set(["/", "/rules", "/rsvp", "/explore"]);
+const PUBLIC_PATHS = new Set(["/", "/rules", "/rsvp"]);
 const PLATFORM_DEFAULT = "/projects";
 
 const PLATFORM_PATHS = new Set([
