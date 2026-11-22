@@ -14,6 +14,7 @@ import { ensureNotificationsTable } from "./notifications.js";
 export const EXPECTED_TABLES = [
   "users",
   "projects",
+  "project_star_awards",
   "journal_entries",
   "project_review_feedback",
   "ysws_project_submissions",

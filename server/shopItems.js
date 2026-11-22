@@ -2,6 +2,7 @@ import { persistOrderAirtableRecordId, syncShopOrderToAirtable } from "./airtabl
 import { MIN_PURCHASE_USD, usdToCoins } from "./coinRates.js";
 import { pool } from "./db.js";
 import { normalizeShopLabelColor, shopLabelColorHex } from "./shopLabelColors.js";
+import { MAX_PARTICIPANT_STARS, STAR_REWARD_CATEGORIES } from "./starConstants.js";
 
 const SHOP_ITEM_COLUMNS = [
   "name",
@@ -21,6 +22,8 @@ const SHOP_ITEM_COLUMNS = [
   "frame_label",
   "frame_label_color",
   "required_stars",
+  "star_reward",
+  "star_reward_category",
 ];
 
 const REMOVED_SHOP_ITEM_COLUMNS = [
@@ -56,7 +59,9 @@ export async function ensureShopItemsTable() {
       discount_percent NUMERIC(5, 2),
       airtable_id VARCHAR,
       synced_at DATE,
-      required_stars INTEGER NOT NULL DEFAULT 0
+      required_stars INTEGER NOT NULL DEFAULT 0,
+      star_reward BOOLEAN NOT NULL DEFAULT FALSE,
+      star_reward_category TEXT
     )
   `);
 
@@ -106,6 +111,9 @@ export async function ensureShopItemsTable() {
   `);
   await pool.query(`
     ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS item_usage TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS star_reward_claim BOOLEAN NOT NULL DEFAULT FALSE
   `);
   await pool.query(`
     ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS airtable_record_id VARCHAR
@@ -208,6 +216,8 @@ async function ensureShopItemColumn(column) {
     frame_label: "VARCHAR",
     frame_label_color: "VARCHAR NOT NULL DEFAULT 'green'",
     required_stars: "INTEGER NOT NULL DEFAULT 0",
+    star_reward: "BOOLEAN NOT NULL DEFAULT FALSE",
+    star_reward_category: "TEXT",
   };
 
   await pool.query(`ALTER TABLE shop_items ADD COLUMN IF NOT EXISTS ${column} ${columnDefinitions[column]}`);
@@ -228,6 +238,27 @@ export async function listShopItems({ includeInactive = false } = {}) {
   return result.rows.map(toPublicShopItem);
 }
 
+export async function getStarRewardSummaryForUser(userId) {
+  if (!pool) throw new Error("DATABASE_URL is not set.");
+  const result = await pool.query(
+    `
+      SELECT
+        LEAST($2, COALESCE(u.total_stars, 0))::int AS total_stars,
+        COUNT(o.id) FILTER (WHERE o.star_reward_claim IS TRUE AND o.rejected IS NOT TRUE)::int AS used
+      FROM users u
+      LEFT JOIN shop_orders o ON o.user_id = u.id
+      WHERE u.id = $1
+      GROUP BY u.id
+    `,
+    [userId, MAX_PARTICIPANT_STARS]
+  );
+  const row = result.rows[0];
+  if (!row) return { total: 0, used: 0, remaining: 0 };
+  const total = Number(row.total_stars ?? 0);
+  const used = Number(row.used ?? 0);
+  return { total, used, remaining: Math.max(0, total - used) };
+}
+
 async function nextShopItemPosition(client = pool) {
   const result = await client.query(`
     SELECT COALESCE(MAX(position), -1) + 1 AS next_position
@@ -246,11 +277,12 @@ export async function createShopItem(input) {
     `
       INSERT INTO shop_items (
         name, price, item_link, image_url, description, active, max_per_person,
-        price_usd, discount_percent, airtable_id, synced_at, required_stars, position, frame_label, frame_label_color,
+        price_usd, discount_percent, airtable_id, synced_at, required_stars, star_reward, star_reward_category,
+        position, frame_label, frame_label_color,
         created_at, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW()
+        $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW()
       )
       RETURNING *
     `,
@@ -300,11 +332,13 @@ export async function updateShopItem(id, input) {
         airtable_id = $10,
         synced_at = $11,
         required_stars = $12,
-        position = $13,
-        frame_label = $14,
-        frame_label_color = $15,
+        star_reward = $13,
+        star_reward_category = $14,
+        position = $15,
+        frame_label = $16,
+        frame_label_color = $17,
         updated_at = NOW()
-      WHERE id = $16
+      WHERE id = $18
       RETURNING *
     `,
     [...shopItemValues(values), position, values.frameLabel, values.frameLabelColor, id]
@@ -370,12 +404,12 @@ export async function reorderShopItems(orderedIds) {
   }
 }
 
-function normalizeItemUsage(value) {
+function normalizeItemUsage(value, { required = true } = {}) {
   const text = textOrNull(value);
-  if (!text) {
+  if (!text && required) {
     throw new Error("Please describe what you will buy with this grant.");
   }
-  if (text.length > 2000) {
+  if (text && text.length > 2000) {
     throw new Error("Usage description must be 2000 characters or fewer.");
   }
   return text;
@@ -383,15 +417,6 @@ function normalizeItemUsage(value) {
 
 export async function purchaseShopItemForUser(userId, itemId, input = {}) {
   if (!pool) throw new Error("DATABASE_URL is not set.");
-
-  const amountUsd = numberOrNull(input.amountUsd ?? input.amount_usd ?? input.usdAmount);
-  const totalCoins = usdToCoins(amountUsd);
-  if (totalCoins === null) {
-    throw new Error(`Minimum purchase is $${MIN_PURCHASE_USD.toFixed(2)}.`);
-  }
-
-  const itemUsage = normalizeItemUsage(input.itemUsage ?? input.item_usage);
-
   const quantity = 1;
   const client = await pool.connect();
   try {
@@ -410,12 +435,48 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
     const item = itemResult.rows[0];
     if (!item) throw new Error("Shop item not found.");
 
-    const currentUserResult = await client.query("SELECT total_stars, coins FROM users WHERE id = $1", [userId]);
+    const currentUserResult = await client.query(
+      "SELECT total_stars, coins FROM users WHERE id = $1 FOR UPDATE",
+      [userId]
+    );
     const user = currentUserResult.rows[0];
     if (!user) throw new Error("User not found.");
 
-    if (item.required_stars > 0 && user.total_stars < item.required_stars) {
-      throw new Error(`This item requires ${item.required_stars} star(s) to unlock. You have ${user.total_stars}.`);
+    const totalStars = Math.min(MAX_PARTICIPANT_STARS, Number(user.total_stars ?? 0));
+    const isStarReward = Boolean(item.star_reward);
+    let amountUsd = numberOrNull(input.amountUsd ?? input.amount_usd ?? input.usdAmount);
+    let totalCoins = usdToCoins(amountUsd);
+    let itemUsage = normalizeItemUsage(input.itemUsage ?? input.item_usage, { required: !isStarReward });
+    let starRewardsRemaining;
+    if (isStarReward) {
+      if (Number(item.required_stars ?? 0) > totalStars) {
+        throw new Error(`This reward requires ${item.required_stars} stars. You have ${totalStars}.`);
+      }
+      const claimsResult = await client.query(
+        `
+          SELECT COUNT(*)::int AS used
+          FROM shop_orders
+          WHERE user_id = $1
+            AND star_reward_claim IS TRUE
+            AND rejected IS NOT TRUE
+        `,
+        [userId]
+      );
+      const usedClaims = Number(claimsResult.rows[0]?.used ?? 0);
+      if (usedClaims >= totalStars) {
+        throw new Error(`Your ${totalStars} star${totalStars === 1 ? "" : "s"} unlock ${totalStars} reward claim${totalStars === 1 ? "" : "s"}. You have used them all.`);
+      }
+      starRewardsRemaining = totalStars - usedClaims - 1;
+      amountUsd = 0;
+      totalCoins = 0;
+      itemUsage = itemUsage || "Star reward redemption";
+    } else {
+      if (item.required_stars > 0 && totalStars < item.required_stars) {
+        throw new Error(`This item requires ${item.required_stars} star(s) to unlock. You have ${totalStars}.`);
+      }
+      if (totalCoins === null) {
+        throw new Error(`Minimum purchase is $${MIN_PURCHASE_USD.toFixed(2)}.`);
+      }
     }
 
     if (item.max_per_person) {
@@ -435,33 +496,35 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
       }
     }
 
-    const userResult = await client.query(
-      `
-        UPDATE users
-        SET coins = coins - $1,
-            updated_at = NOW()
-        WHERE id = $2
-          AND coins >= $1
-        RETURNING id, coins
-      `,
-      [totalCoins, userId]
-    );
-
-    if (!userResult.rows[0]) {
-      const currentUser = await client.query("SELECT coins FROM users WHERE id = $1", [userId]);
-      const availableCoins = Number(currentUser.rows[0]?.coins ?? 0);
-      throw new Error(
-        `Not enough coins. You have ${formatCoinAmount(availableCoins)} coins, but this costs ${formatCoinAmount(totalCoins)} (${formatUsdAmount(amountUsd)}).`
+    let userCoins = Number(user.coins ?? 0);
+    if (!isStarReward) {
+      const userResult = await client.query(
+        `
+          UPDATE users
+          SET coins = coins - $1,
+              updated_at = NOW()
+          WHERE id = $2
+            AND coins >= $1
+          RETURNING id, coins
+        `,
+        [totalCoins, userId]
       );
+
+      if (!userResult.rows[0]) {
+        throw new Error(
+          `Not enough coins. You have ${formatCoinAmount(userCoins)} coins, but this costs ${formatCoinAmount(totalCoins)} (${formatUsdAmount(amountUsd)}).`
+        );
+      }
+      userCoins = Number(userResult.rows[0].coins ?? 0);
     }
 
     const orderResult = await client.query(
       `
-        INSERT INTO shop_orders (user_id, item_id, quantity, total_coins, total_usd, item_usage, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+        INSERT INTO shop_orders (user_id, item_id, quantity, total_coins, total_usd, item_usage, star_reward_claim, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
         RETURNING id
       `,
-      [userId, itemId, quantity, totalCoins, amountUsd, itemUsage]
+      [userId, itemId, quantity, totalCoins, amountUsd, itemUsage, isStarReward]
     );
 
     await client.query("COMMIT");
@@ -478,7 +541,9 @@ export async function purchaseShopItemForUser(userId, itemId, input = {}) {
       totalCoins,
       totalUsd: amountUsd,
       itemUsage,
-      userCoins: Number(userResult.rows[0].coins ?? 0),
+      starRewardClaim: isStarReward,
+      starRewardsRemaining,
+      userCoins,
       orderId,
     };
   } catch (error) {
@@ -506,8 +571,21 @@ function safeHttpUrl(value) {
 function normalizeShopItemInput(input = {}) {
   const price = optionalCoinPriceOrNull(input.price);
   const priceUsd = numberOrNull(input.priceUsd ?? input.price_usd);
+  const requiredStars = integerOrNull(input.requiredStars ?? input.required_stars) || 0;
+  const starReward = Boolean(input.starReward ?? input.star_reward);
+  const requestedRewardCategory = textOrNull(input.starRewardCategory ?? input.star_reward_category);
+  const starRewardCategory = starReward ? (requestedRewardCategory || "other") : null;
   if (!textOrNull(input.name)) {
     throw new Error("Shop item name is required.");
+  }
+  if (requiredStars < 0 || requiredStars > MAX_PARTICIPANT_STARS) {
+    throw new Error(`Star requirement must be between 0 and ${MAX_PARTICIPANT_STARS}.`);
+  }
+  if (starReward && requiredStars < 1) {
+    throw new Error("A star reward must require at least one star.");
+  }
+  if (starReward && !Object.hasOwn(STAR_REWARD_CATEGORIES, starRewardCategory)) {
+    throw new Error("Choose a valid star reward category.");
   }
 
   return {
@@ -524,7 +602,9 @@ function normalizeShopItemInput(input = {}) {
     syncedAt: dateOrNull(input.syncedAt ?? input.synced_at),
     position: integerOrNull(input.position),
     frameLabel: textOrNull(input.frameLabel ?? input.frame_label),
-    requiredStars: integerOrNull(input.requiredStars ?? input.required_stars) || 0,
+    requiredStars,
+    starReward,
+    starRewardCategory,
     frameLabelColor: normalizeShopLabelColor(input.frameLabelColor ?? input.frame_label_color),
   };
 }
@@ -543,6 +623,8 @@ function shopItemValues(item) {
     item.airtableId,
     item.syncedAt,
     item.requiredStars,
+    item.starReward,
+    item.starRewardCategory,
   ];
 }
 
@@ -611,6 +693,8 @@ export async function listShopOrders() {
       o.total_coins,
       o.total_usd,
       o.item_usage,
+      o.star_reward_claim,
+      i.star_reward_category,
       o.fulfilled,
       o.rejected,
       o.created_at
@@ -640,6 +724,8 @@ export async function listShopOrdersForUser(userId) {
         o.total_coins,
         o.total_usd,
         o.item_usage,
+        o.star_reward_claim,
+        i.star_reward_category,
         o.fulfilled,
         o.rejected,
         o.created_at
@@ -668,6 +754,7 @@ export function toReviewParticipantShopOrder(order) {
     quantity: order.quantity,
     totalCoins: order.totalCoins,
     totalUsd: order.totalUsd,
+    starRewardClaim: order.starRewardClaim,
     createdAt: order.createdAt,
   };
 }
@@ -813,6 +900,8 @@ function toPublicShopItem(row) {
     frameLabel: row.frame_label,
     frameLabelColor: normalizeShopLabelColor(row.frame_label_color),
     requiredStars: Number(row.required_stars ?? 0),
+    starReward: Boolean(row.star_reward),
+    starRewardCategory: row.star_reward_category || null,
     frameLabelHex: shopLabelColorHex(row.frame_label_color),
   };
 }
@@ -830,6 +919,8 @@ function toPublicShopOrder(row) {
     totalCoins: row.total_coins,
     totalUsd: row.total_usd,
     itemUsage: row.item_usage,
+    starRewardClaim: Boolean(row.star_reward_claim),
+    starRewardCategory: row.star_reward_category || null,
     fulfilled: row.fulfilled,
     rejected: row.rejected,
     createdAt: row.created_at,
