@@ -132,14 +132,34 @@ export default function App() {
     return <PlatformGate onUnlocked={loadPlatformStatus} />;
   }
 
+  const contextValue = {
+    user: auth.user,
+    status: auth.status,
+    reload: loadMe,
+  };
+
   if (isPublicPath) {
     if (isJournalingPath) {
       const [, , projectId, token] = pathname.split("/");
       return <JournalingReviewPage projectId={projectId} token={token} />;
     }
-    if (pathname === "/explore") return <ExplorePage />;
-    if (pathname.startsWith("/project/")) return <PublicProjectPage projectId={pathname.slice("/project/".length)} />;
-    if (pathname.startsWith("/participants/")) return <ParticipantPage identifier={pathname.slice("/participants/".length)} />;
+    if (pathname === "/explore") {
+      return <AuthContext.Provider value={contextValue}><ExplorePage /></AuthContext.Provider>;
+    }
+    if (pathname.startsWith("/project/")) {
+      return (
+        <AuthContext.Provider value={contextValue}>
+          <PublicProjectPage projectId={pathname.slice("/project/".length)} />
+        </AuthContext.Provider>
+      );
+    }
+    if (pathname.startsWith("/participants/")) {
+      return (
+        <AuthContext.Provider value={contextValue}>
+          <ParticipantPage identifier={pathname.slice("/participants/".length)} />
+        </AuthContext.Provider>
+      );
+    }
     if (pathname === "/rsvp") {
       return <RsvpPage />;
     }
@@ -178,12 +198,6 @@ export default function App() {
     window.location.replace(PLATFORM_DEFAULT);
     return null;
   }
-
-  const contextValue = {
-    user: auth.user,
-    status: auth.status,
-    reload: loadMe,
-  };
 
   let page;
   switch (pathname) {
