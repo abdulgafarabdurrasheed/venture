@@ -1,9 +1,9 @@
 import { apiFetch } from "../api/client.js";
 import { useEffect, useState } from "react";
-import { COINS_PER_APPROVED_HOUR, COINS_PER_USD, USD_PER_APPROVED_HOUR } from "../constants/coinRates.js";
 import { CDN_UPLOAD_HELP, isHackClubCdnUrl, normalizeHackClubCdnUrl } from "../utils/cdnLinks.js";
 import { shopItemPayload } from "../utils/shopItemPayload.js";
 import { DEFAULT_SHOP_LABEL_COLOR, SHOP_LABEL_COLORS } from "../constants/shopLabelColors.js";
+import { starRewardCategoryLabel, STAR_REWARD_CATEGORIES } from "../constants/starRewards.js";
 import "./AdminShopPage.css";
 
 const emptyForm = {
@@ -12,6 +12,9 @@ const emptyForm = {
   frameLabelColor: DEFAULT_SHOP_LABEL_COLOR,
   discountPercent: "",
   maxPerPerson: "",
+  requiredStars: "0",
+  starReward: false,
+  starRewardCategory: "creator_gear",
   itemLink: "",
   imageUrl: "",
   description: "",
@@ -182,10 +185,8 @@ export function AdminShopPage() {
         <h1>Shop Admin</h1>
 
         <p className="admin-shop-pricing-note">
-          Items have no fixed price. At checkout, participants enter how much they need in dollars. The platform
-          charges coins at ${USD_PER_APPROVED_HOUR}/approved hour ({COINS_PER_APPROVED_HOUR} coins/hour, {COINS_PER_USD}{" "}
-          coins per $1). Use the order controls to set shop display order, and add a frame label for each item shown on
-          the shop card.
+          Manage travel grants and star rewards here. Each participant can claim one eligible star reward per earned
+          star, up to five total. Use the order controls to set shop display order and add a frame label to each card.
         </p>
 
         <div className="admin-shop-orders-link">
@@ -235,6 +236,8 @@ export function AdminShopPage() {
                   <th>ID</th>
                   <th>Name</th>
                   <th>Frame label</th>
+                  <th>Star reward</th>
+                  <th>Min stars</th>
                   <th>Max / person</th>
                   <th>Discount</th>
                   <th>Link</th>
@@ -245,7 +248,7 @@ export function AdminShopPage() {
               <tbody>
                 {visibleItems.length === 0 ? (
                   <tr>
-                    <td colSpan="9">No shop items yet.</td>
+                    <td colSpan="11">No shop items yet.</td>
                   </tr>
                 ) : (
                   visibleItems.map((item) => {
@@ -278,6 +281,8 @@ export function AdminShopPage() {
                       <td>{item.id}</td>
                       <td>{item.name || "—"}</td>
                       <td>{item.frameLabel || "—"}</td>
+                      <td>{item.starReward ? starRewardCategoryLabel(item.starRewardCategory) : "—"}</td>
+                      <td>{Number(item.requiredStars) > 0 ? `${Number(item.requiredStars)}★` : "—"}</td>
                       <td>{item.maxPerPerson ?? "None"}</td>
                       <td>{item.discountPercent ? `${item.discountPercent}% off` : "—"}</td>
                       <td>{item.itemLink ? <a href={item.itemLink} target="_blank" rel="noreferrer">View</a> : "—"}</td>
@@ -379,6 +384,44 @@ function ShopItemForm({ value, submitLabel, onChange, onSubmit }) {
           </div>
         </fieldset>
       </div>
+      <label>
+        Minimum stars to unlock
+        <input
+          type="number"
+          min="0"
+          max="5"
+          step="1"
+          value={value.requiredStars ?? 0}
+          onChange={(event) => onChange("requiredStars", event.target.value)}
+        />
+        <span className="admin-shop-form-hint">0 leaves this item open to everyone; 1–5 sets the participant star tier.</span>
+      </label>
+      <label>
+        Star reward
+        <input
+          type="checkbox"
+          checked={Boolean(value.starReward)}
+          onChange={(event) => {
+            const enabled = event.target.checked;
+            onChange("starReward", enabled);
+            if (enabled && Number(value.requiredStars) < 1) onChange("requiredStars", "1");
+          }}
+        />
+        <span className="admin-shop-form-hint">Claims one of the participant&apos;s reward slots. Each earned star unlocks one eligible reward claim.</span>
+      </label>
+      {value.starReward ? (
+        <label>
+          Reward type
+          <select
+            value={value.starRewardCategory || "other"}
+            onChange={(event) => onChange("starRewardCategory", event.target.value)}
+          >
+            {STAR_REWARD_CATEGORIES.map((category) => (
+              <option key={category.value} value={category.value}>{category.label}</option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label>
         Discount %
         <input

@@ -1,5 +1,6 @@
 import { apiFetch } from "../api/client.js";
 import { useEffect, useMemo, useState } from "react";
+import { starRewardCategoryLabel } from "../constants/starRewards.js";
 import "./AdminShopPage.css";
 
 function formatUsd(value) {
@@ -75,7 +76,9 @@ export function AdminShopOrdersPage() {
   }
 
   async function rejectOrder(order) {
-    const ok = window.confirm(`Reject order #${order.id} and refund ${Number(order.totalCoins ?? 0)} coins?`);
+    const ok = window.confirm(order.starRewardClaim
+      ? `Reject star reward claim #${order.id}? This releases the participant's reward slot.`
+      : `Reject order #${order.id} and refund ${Number(order.totalCoins ?? 0)} coins?`);
     if (!ok) return;
 
     try {
@@ -179,13 +182,21 @@ export function AdminShopOrdersPage() {
                           <div className="admin-shop-order-card-main">
                             <span className={`status-badge ${status}`}>{status}</span>
                             <h2>{order.itemName || "Unknown item"}</h2>
-                            <p>
-                              Purchase: {formatUsd(orderUsdTotal(order))} · {Number(order.totalCoins ?? 0)} coins
-                            </p>
-                            <div className="admin-shop-order-money">
-                              <span>Amount requested: {formatUsd(orderUsdTotal(order))}</span>
-                              <span>Coins charged: {Number(order.totalCoins ?? 0)}</span>
-                            </div>
+                            {order.starRewardClaim ? (
+                              <p>
+                                {starRewardCategoryLabel(order.starRewardCategory)} claim · one reward slot used · no coins charged
+                              </p>
+                            ) : (
+                              <>
+                                <p>
+                                  Purchase: {formatUsd(orderUsdTotal(order))} · {Number(order.totalCoins ?? 0)} coins
+                                </p>
+                                <div className="admin-shop-order-money">
+                                  <span>Amount requested: {formatUsd(orderUsdTotal(order))}</span>
+                                  <span>Coins charged: {Number(order.totalCoins ?? 0)}</span>
+                                </div>
+                              </>
+                            )}
 
                             <div className="admin-shop-order-customer">
                               <strong>Customer</strong>
@@ -195,13 +206,13 @@ export function AdminShopOrdersPage() {
 
                             {order.itemUsage ? (
                               <div className="admin-shop-order-usage">
-                                <strong>Grant usage</strong>
+                                <strong>{order.starRewardClaim ? "Fulfillment notes" : "Grant usage"}</strong>
                                 <p>{order.itemUsage}</p>
                               </div>
                             ) : (
                               <div className="admin-shop-order-usage admin-shop-order-usage--missing">
-                                <strong>Grant usage</strong>
-                                <p>No usage description provided.</p>
+                                <strong>{order.starRewardClaim ? "Fulfillment notes" : "Grant usage"}</strong>
+                                <p>{order.starRewardClaim ? "No fulfillment notes provided." : "No usage description provided."}</p>
                               </div>
                             )}
 
@@ -216,7 +227,7 @@ export function AdminShopOrdersPage() {
                               ✓ Mark fulfilled
                             </button>
                             <button type="button" disabled={!isActionable} className="danger" onClick={() => rejectOrder(order)}>
-                              × Reject (refund coins)
+                              × Reject {order.starRewardClaim ? "(release slot)" : "(refund coins)"}
                             </button>
                           </div>
                         </article>

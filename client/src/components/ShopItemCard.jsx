@@ -2,6 +2,7 @@ import shopFrame from "@assets/landing_page/shop_section/shopFrame.png";
 import buyBtn from "@assets/common_to_pages/buy_btn.png";
 import { resolveShopItemImage } from "../utils/shopItemImages.js";
 import { shopLabelColorHex } from "../constants/shopLabelColors.js";
+import { starRewardCategoryLabel } from "../constants/starRewards.js";
 import "./ShopItemCard.css";
 
 function ShopItemTitle({ name }) {
@@ -27,13 +28,15 @@ function formatDiscount(value) {
   return Math.round(numeric);
 }
 
-export function ShopItemCard({ item, onOpen, disabled, userStars = 0 }) {
+export function ShopItemCard({ item, onOpen, disabled, userStars = 0, starRewardsRemaining = 0 }) {
   const discount = formatDiscount(item.discountPercent);
   const requiredStars = Number(item.requiredStars) || 0;
-  const isStarLocked = requiredStars > Number(userStars || 0);
+  const isBelowStarTier = requiredStars > Number(userStars || 0);
+  const hasRewardClaim = Number(starRewardsRemaining) > 0;
+  const isStarLocked = isBelowStarTier || (item.starReward && !hasRewardClaim);
   const imageSrc = resolveShopItemImage(item);
   const usesCustomImage = Boolean(item?.imageUrl);
-  const frameLabel = String(item.frameLabel || "").trim();
+  const frameLabel = String(item.frameLabel || (item.starReward ? starRewardCategoryLabel(item.starRewardCategory) : "")).trim();
   const labelHex = item.frameLabelHex || shopLabelColorHex(item.frameLabelColor ?? item.frame_label_color);
   const labelIsDark = (item.frameLabelColor ?? item.frame_label_color) === "red";
 
@@ -58,12 +61,18 @@ export function ShopItemCard({ item, onOpen, disabled, userStars = 0 }) {
             </span>
           ) : null}
 
-          {requiredStars > 0 ? (
+          {requiredStars > 0 || item.starReward ? (
             <span
               className={`shop-item-card__star-gate${isStarLocked ? " is-locked" : ""}`}
-              aria-label={isStarLocked ? `Requires ${requiredStars} stars to unlock` : `Unlocked with ${requiredStars} stars`}
+              aria-label={isStarLocked
+                ? item.starReward && !isBelowStarTier && !hasRewardClaim
+                  ? "No star reward claims remaining"
+                  : `Requires ${requiredStars} stars to ${item.starReward ? "claim this reward" : "unlock"}`
+                : item.starReward ? "Available as one star reward claim" : `Unlocked with ${requiredStars} stars`}
             >
-              {isStarLocked ? `${requiredStars}★ to unlock` : "★ unlocked"}
+              {item.starReward
+                ? isBelowStarTier ? `${requiredStars}★ to claim` : !hasRewardClaim ? "No claims left" : "1 star reward claim"
+                : isStarLocked ? `${requiredStars}★ to unlock` : "★ unlocked"}
             </span>
           ) : null}
 
@@ -84,7 +93,7 @@ export function ShopItemCard({ item, onOpen, disabled, userStars = 0 }) {
             className="shop-item-card__buy"
             onClick={() => onOpen?.(item)}
             disabled={disabled}
-            aria-label={`Buy ${item.name}`}
+            aria-label={`${item.starReward ? "Claim" : "Buy"} ${item.name}`}
           >
             <img src={buyBtn} alt="" draggable={false} />
           </button>

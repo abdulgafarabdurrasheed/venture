@@ -105,7 +105,8 @@
 }
 
 .admin-shop-form input,
-.admin-shop-form textarea {
+.admin-shop-form textarea,
+.admin-shop-form select {
   width: 100%;
   box-sizing: border-box;
   border: 2px solid #8b6239;
@@ -166,6 +167,10 @@
 .admin-shop-form input[type="checkbox"] {
   width: auto;
   accent-color: #f7cf57;
+}
+
+.admin-shop-form select {
+  min-height: 2.6rem;
 }
 
 .admin-shop-form textarea {
